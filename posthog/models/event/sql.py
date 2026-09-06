@@ -1,7 +1,7 @@
 from django.conf import settings
 
 from posthog.hogql.escape_sql import escape_clickhouse_identifier, escape_clickhouse_string
-from posthog.hogql.functions.udfs import JSON_DROP_KEYS_CLICKHOUSE_NAME
+from posthog.hogql.functions.udfs import JSON_DROP_KEYS_BASE_NAME, JSON_DROP_KEYS_CLICKHOUSE_NAME
 
 from posthog.clickhouse.base_sql import COPY_ROWS_BETWEEN_TEAMS_BASE_SQL
 from posthog.clickhouse.cluster import ON_CLUSTER_CLAUSE
@@ -32,6 +32,7 @@ from posthog.clickhouse.kafka_engine import (
 )
 from posthog.clickhouse.property_groups import property_groups
 from posthog.clickhouse.table_engines import Distributed, ReplacingMergeTree, ReplicationScheme
+from posthog.cloud_utils import is_cloud
 from posthog.kafka_client.topics import KAFKA_EVENTS_JSON
 
 
@@ -572,7 +573,7 @@ FROM {database}.{kafka_table} AS source
         database=settings.CLICKHOUSE_DATABASE,
         properties_expr=_clean_properties("source.properties", "JSONCleanPostHogEventProperties"),
         person_properties_expr=_clean_properties("source.person_properties", "JSONCleanPostHogPersonProperties"),
-        json_drop_keys=JSON_DROP_KEYS_CLICKHOUSE_NAME,
+        json_drop_keys=JSON_DROP_KEYS_CLICKHOUSE_NAME if is_cloud() else JSON_DROP_KEYS_BASE_NAME,
         marker=marker,
         properties_type=escape_clickhouse_string(properties_type),
         person_properties_type=escape_clickhouse_string(person_properties_type),
