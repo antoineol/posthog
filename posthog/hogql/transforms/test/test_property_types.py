@@ -1443,6 +1443,12 @@ class TestEventsSchemaPropertyParity(ClickhouseTestMixin, HypothesisDjangoTestCa
             event="schema-parity",
             properties={"$feature_flags": {"disabled": "false"}},
         )
+        restricted_only_uuid = _create_event(
+            team=self.team,
+            distinct_id="native-restricted-flags",
+            event="schema-parity",
+            properties={"$active_feature_flags": ["secret"], "$feature_flags": {"secret": "false"}},
+        )
         flush_persons_and_events()
 
         legacy = execute_hogql_query(
@@ -1490,6 +1496,15 @@ class TestEventsSchemaPropertyParity(ClickhouseTestMixin, HypothesisDjangoTestCa
         }
         assert restricted.results[0][1] == 0
         assert json.loads(restricted.results[0][2]) == ["false-variant", "only-in-array"]
+
+        restricted_only = execute_hogql_query(
+            "SELECT properties.$active_feature_flags, properties.$active_feature_flags != null, "
+            "JSONHas(properties, '$active_feature_flags') "
+            f"FROM events WHERE uuid = '{restricted_only_uuid}'",
+            team=self.team,
+            context=restricted_context,
+        )
+        assert restricted_only.results == [("[]", 0, 0)]
 
         empty = execute_hogql_query(
             "SELECT properties.$active_feature_flags, properties.$active_feature_flags != null, "
