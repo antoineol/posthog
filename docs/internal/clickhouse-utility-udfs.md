@@ -84,6 +84,8 @@ When any event or person property is access-restricted, HogQL also hides that pr
 
 Property removal is not a supported service. Native JSON events do not support property rewriting; retained temporary properties and quarantine diagnostics are not covered by the legacy property-removal machinery. Person, event, and team deletion still remove complete rows, including those retained columns.
 
+Native-event queries derive `$active_feature_flags` from the `$feature_flags` map, excluding empty and `false` values and restricted flags. Array order follows the stored map rather than the original SDK evaluation order. No separate active-flags column is required.
+
 ### Benchmarking the cleaner
 
 `BenchmarkProcessFixture` measures cleaning with a reused processor and output buffer.
