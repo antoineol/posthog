@@ -57,3 +57,5 @@ Both functions use the same executable. The temporary entry point uses `--tempor
 Documents exceeding the shared depth limit produce `{}` in the temporary output; the permanent cleaner quarantines the original document.
 
 The native events ingestion view writes `temporary_properties` from the original event JSON and sets `inserted_at` when inserting. The storage column expires with `TTL toDateTime(inserted_at) + INTERVAL 60 DAY`; historical events receive the same retention window. Backfills set a fresh insertion time and run both cleaners without event-age checks. TTL merges clear the temporary column while retaining the event row.
+
+These schema changes apply retroactively through migration `0289_events_json_schema`, which uses the current schema helpers. No additional migration recreates existing tables.
