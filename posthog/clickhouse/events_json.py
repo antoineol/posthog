@@ -118,7 +118,6 @@ EVENTS_PROPERTIES_JSON_SUBCOLUMN_DECLARED_TYPES: dict[str, str] = {
     "$exception_type": "String",
     "$exception_types": "Array(String)",
     "$exception_values": "Array(String)",
-    "$feature_flag_request_id": "String",
     "$feature_flags": "Map(LowCardinality(String), LowCardinality(String))",
     "$geoip_accuracy_radius": "String",
     "$geoip_city_name": "LowCardinality(String)",
