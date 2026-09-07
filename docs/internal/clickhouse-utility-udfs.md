@@ -59,3 +59,5 @@ Documents exceeding the shared depth limit produce `{}` in the temporary output;
 The native events ingestion view writes `temporary_properties` from the original event JSON and sets `inserted_at` when inserting. The storage column expires with `TTL toDateTime(inserted_at) + INTERVAL 60 DAY`; historical events receive the same retention window. Backfills set a fresh insertion time and run both cleaners without event-age checks. TTL merges clear the temporary column while retaining the event row.
 
 These schema changes apply retroactively through migration `0289_events_json_schema`, which uses the current schema helpers. No additional migration recreates existing tables.
+
+The native storage schema keeps parsing failures inside each JSON column under `$unparseable_properties`; it stores no separate quarantine or active-feature-flags columns. The ingestion view writes the cleaner outputs directly. Session and group compatibility aliases are computed on the distributed read table. Storage timestamps use `GCD` and Kafka metadata and event sizes use `T64`; distributed tables omit storage codecs.

@@ -1556,34 +1556,20 @@ database "posthog" {
     column "person_properties" {
       type = "JSON(max_dynamic_paths=0, `$app_version` String, `$app_build` String, `$app_name` String, `$app_namespace` String, `$browser` LowCardinality(String), `$browser_language` String, `$browser_language_prefix` String, `$browser_type` String, `$browser_version` LowCardinality(String), `$current_url` String, `$device` String, `$device_id` String, `$device_manufacturer` String, `$device_model` String, `$device_name` String, `$device_type` LowCardinality(String), `$geoip_continent_name` LowCardinality(String), `$geoip_continent_code` LowCardinality(String), `$geoip_country_code` LowCardinality(String), `$geoip_country_name` LowCardinality(String), `$geoip_city_name` LowCardinality(String), `$geoip_postal_code` String, `$geoip_subdivision_1_code` String, `$geoip_subdivision_1_name` LowCardinality(String), `$geoip_subdivision_2_code` String, `$geoip_subdivision_2_name` String, `$geoip_time_zone` LowCardinality(String), `$initial_current_url` String, `$initial_app_build` String, `$initial_app_name` String, `$initial_app_namespace` String, `$initial_app_version` String, `$initial_browser` LowCardinality(String), `$initial_browser_language` String, `$initial_browser_language_prefix` String, `$initial_browser_type` String, `$initial_browser_version` LowCardinality(String), `$initial_device` String, `$initial_device_id` String, `$initial_device_manufacturer` String, `$initial_device_model` String, `$initial_device_name` String, `$initial_device_type` LowCardinality(String), `$initial_geoip_city_name` String, `$initial_geoip_continent_code` String, `$initial_geoip_continent_name` String, `$initial_geoip_country_code` String, `$initial_geoip_country_name` LowCardinality(String), `$initial_geoip_postal_code` String, `$initial_geoip_subdivision_1_code` String, `$initial_geoip_subdivision_1_name` LowCardinality(String), `$initial_geoip_subdivision_2_code` String, `$initial_geoip_subdivision_2_name` String, `$initial_geoip_time_zone` LowCardinality(String), `$initial_fbclid` String, `$initial_gad_source` String, `$initial_gbraid` String, `$initial_gclid` String, `$initial_gclsrc` String, `$initial_dclid` String, `$initial_msclkid` String, `$initial_twclid` String, `$initial_li_fat_id` String, `$initial_mc_cid` String, `$initial_igshid` String, `$initial_ttclid` String, `$initial_rdt_cid` String, `$initial_epik` String, `$initial_qclid` String, `$initial_sccid` String, `$initial_irclid` String, `$initial__kx` String, `$initial_pathname` String, `$initial_os` LowCardinality(String), `$initial_os_name` String, `$initial_os_version` LowCardinality(String), `$initial_raw_user_agent` LowCardinality(String), `$initial_referrer` String, `$initial_referring_domain` String, `$initial_screen_height` LowCardinality(String), `$initial_screen_width` LowCardinality(String), `$initial_search_engine` String, `$initial_utm_campaign` String, `$initial_utm_content` String, `$initial_utm_medium` String, `$initial_utm_source` String, `$initial_utm_term` String, `$initial_viewport_height` String, `$initial_viewport_width` String, `$initial_wbraid` String, `$os_name` String, `$os` LowCardinality(String), `$os_version` LowCardinality(String), `$pathname` String, `$raw_user_agent` LowCardinality(String), `$referrer` String, `$screen_height` LowCardinality(String), `$screen_width` LowCardinality(String), `$search_engine` String, `$viewport_height` String, `$viewport_width` String, `$referring_domain` String, `$email` String, `$last_seen_survey_date` String, `$organization_id` String, `$product_tour_last_seen_date` String, `$survey_last_seen_date` String, `Email Domain` String, `companyName` String, `customer` String, `email` String, `first_name` String, `hubspot_score` String, `id` String, `icp_role` String, `is_email_verified` String, `is_signed_up` String, `last_name` String, `name` String, `organization_id` String, `organization_member_count` String, `role` String, `role_at_organization` String, `serverMarketing` String, `serverMasterclass` String, `user_email_domain` String, `username` String, `utm_source` String, `utm_medium` String, `utm_campaign` String, `utm_content` String, `utm_term` String, `gclid` String, `gad_source` String, `gclsrc` String, `dclid` String, `gbraid` String, `wbraid` String, `fbclid` String, `msclkid` String, `twclid` String, `li_fat_id` String, `mc_cid` String, `igshid` String, `ttclid` String, `rdt_cid` String, `epik` String, `qclid` String, `sccid` String, `irclid` String, `_kx` String, `val_region` String)"
     }
-    column "_unparseable_properties" {
-      type = "String"
-    }
-    column "_unparseable_person_properties" {
-      type = "String"
-    }
-    column "_active_feature_flags" {
-      type = "String"
-    }
     column "group0_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group1_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group2_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group3_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group4_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "person_created_at" {
       type = "DateTime64(3)"
@@ -1626,30 +1612,6 @@ database "posthog" {
     column "_partition" {
       type = "UInt64"
     }
-    column "$group_0" {
-      type = "String"
-    }
-    column "$group_1" {
-      type = "String"
-    }
-    column "$group_2" {
-      type = "String"
-    }
-    column "$group_3" {
-      type = "String"
-    }
-    column "$group_4" {
-      type = "String"
-    }
-    column "$window_id" {
-      type = "String"
-    }
-    column "$session_id" {
-      type = "String"
-    }
-    column "$session_id_uuid" {
-      type = "Nullable(UInt128)"
-    }
     column "elements_chain_href" {
       type = "String"
     }
@@ -1661,6 +1623,38 @@ database "posthog" {
     }
     column "elements_chain_elements" {
       type = "Array(Enum8('a'=1, 'button'=2, 'form'=3, 'input'=4, 'select'=5, 'textarea'=6, 'label'=7))"
+    }
+    column "$group_0" {
+      type  = "String"
+      alias = "ifNull(properties.`$group_0`, '')"
+    }
+    column "$group_1" {
+      type  = "String"
+      alias = "ifNull(properties.`$group_1`, '')"
+    }
+    column "$group_2" {
+      type  = "String"
+      alias = "ifNull(properties.`$group_2`, '')"
+    }
+    column "$group_3" {
+      type  = "String"
+      alias = "ifNull(properties.`$group_3`, '')"
+    }
+    column "$group_4" {
+      type  = "String"
+      alias = "ifNull(properties.`$group_4`, '')"
+    }
+    column "$window_id" {
+      type  = "String"
+      alias = "ifNull(properties.`$window_id`, '')"
+    }
+    column "$session_id" {
+      type  = "String"
+      alias = "ifNull(properties.`$session_id`, '')"
+    }
+    column "$session_id_uuid" {
+      type  = "Nullable(UInt128)"
+      alias = "toUInt128(toUUIDOrNull(properties.`$session_id`))"
     }
     engine "distributed" {
       cluster_name    = "posthog"
@@ -5524,7 +5518,7 @@ database "posthog" {
 
   table "sharded_events_json" {
     primary_key  = ["team_id", "toDate(timestamp)", "event", "cityHash64(distinct_id)"]
-    order_by     = ["team_id", "toDate(timestamp)", "event", "cityHash64(distinct_id)", "distinct_id", "timestamp", "uuid"]
+    order_by     = ["team_id", "toDate(timestamp)", "event", "cityHash64(distinct_id)", "timestamp", "uuid"]
     partition_by = "clamp(toYYYYMM(timestamp), 202001, 203512)"
     sample_by    = "cityHash64(distinct_id)"
     settings = {
@@ -5551,7 +5545,8 @@ database "posthog" {
       ttl  = "toDateTime(inserted_at) + toIntervalDay(60)"
     }
     column "timestamp" {
-      type = "DateTime64(6, 'UTC')"
+      type  = "DateTime64(6, 'UTC')"
+      codec = "GCD, Default"
     }
     column "team_id" {
       type = "Int64"
@@ -5565,12 +5560,15 @@ database "posthog" {
     column "created_at" {
       type    = "DateTime64(6, 'UTC')"
       default = "now()"
+      codec   = "GCD, Default"
     }
     column "_timestamp" {
-      type = "DateTime"
+      type  = "DateTime"
+      codec = "T64, Default"
     }
     column "_offset" {
-      type = "UInt64"
+      type  = "UInt64"
+      codec = "T64, Default"
     }
     column "elements_chain" {
       type = "String"
@@ -5581,37 +5579,24 @@ database "posthog" {
     column "person_properties" {
       type = "JSON(max_dynamic_paths=0, `$app_version` String, `$app_build` String, `$app_name` String, `$app_namespace` String, `$browser` LowCardinality(String), `$browser_language` String, `$browser_language_prefix` String, `$browser_type` String, `$browser_version` LowCardinality(String), `$current_url` String, `$device` String, `$device_id` String, `$device_manufacturer` String, `$device_model` String, `$device_name` String, `$device_type` LowCardinality(String), `$geoip_continent_name` LowCardinality(String), `$geoip_continent_code` LowCardinality(String), `$geoip_country_code` LowCardinality(String), `$geoip_country_name` LowCardinality(String), `$geoip_city_name` LowCardinality(String), `$geoip_postal_code` String, `$geoip_subdivision_1_code` String, `$geoip_subdivision_1_name` LowCardinality(String), `$geoip_subdivision_2_code` String, `$geoip_subdivision_2_name` String, `$geoip_time_zone` LowCardinality(String), `$initial_current_url` String, `$initial_app_build` String, `$initial_app_name` String, `$initial_app_namespace` String, `$initial_app_version` String, `$initial_browser` LowCardinality(String), `$initial_browser_language` String, `$initial_browser_language_prefix` String, `$initial_browser_type` String, `$initial_browser_version` LowCardinality(String), `$initial_device` String, `$initial_device_id` String, `$initial_device_manufacturer` String, `$initial_device_model` String, `$initial_device_name` String, `$initial_device_type` LowCardinality(String), `$initial_geoip_city_name` String, `$initial_geoip_continent_code` String, `$initial_geoip_continent_name` String, `$initial_geoip_country_code` String, `$initial_geoip_country_name` LowCardinality(String), `$initial_geoip_postal_code` String, `$initial_geoip_subdivision_1_code` String, `$initial_geoip_subdivision_1_name` LowCardinality(String), `$initial_geoip_subdivision_2_code` String, `$initial_geoip_subdivision_2_name` String, `$initial_geoip_time_zone` LowCardinality(String), `$initial_fbclid` String, `$initial_gad_source` String, `$initial_gbraid` String, `$initial_gclid` String, `$initial_gclsrc` String, `$initial_dclid` String, `$initial_msclkid` String, `$initial_twclid` String, `$initial_li_fat_id` String, `$initial_mc_cid` String, `$initial_igshid` String, `$initial_ttclid` String, `$initial_rdt_cid` String, `$initial_epik` String, `$initial_qclid` String, `$initial_sccid` String, `$initial_irclid` String, `$initial__kx` String, `$initial_pathname` String, `$initial_os` LowCardinality(String), `$initial_os_name` String, `$initial_os_version` LowCardinality(String), `$initial_raw_user_agent` LowCardinality(String), `$initial_referrer` String, `$initial_referring_domain` String, `$initial_screen_height` LowCardinality(String), `$initial_screen_width` LowCardinality(String), `$initial_search_engine` String, `$initial_utm_campaign` String, `$initial_utm_content` String, `$initial_utm_medium` String, `$initial_utm_source` String, `$initial_utm_term` String, `$initial_viewport_height` String, `$initial_viewport_width` String, `$initial_wbraid` String, `$os_name` String, `$os` LowCardinality(String), `$os_version` LowCardinality(String), `$pathname` String, `$raw_user_agent` LowCardinality(String), `$referrer` String, `$screen_height` LowCardinality(String), `$screen_width` LowCardinality(String), `$search_engine` String, `$viewport_height` String, `$viewport_width` String, `$referring_domain` String, `$email` String, `$last_seen_survey_date` String, `$organization_id` String, `$product_tour_last_seen_date` String, `$survey_last_seen_date` String, `Email Domain` String, `companyName` String, `customer` String, `email` String, `first_name` String, `hubspot_score` String, `id` String, `icp_role` String, `is_email_verified` String, `is_signed_up` String, `last_name` String, `name` String, `organization_id` String, `organization_member_count` String, `role` String, `role_at_organization` String, `serverMarketing` String, `serverMasterclass` String, `user_email_domain` String, `username` String, `utm_source` String, `utm_medium` String, `utm_campaign` String, `utm_content` String, `utm_term` String, `gclid` String, `gad_source` String, `gclsrc` String, `dclid` String, `gbraid` String, `wbraid` String, `fbclid` String, `msclkid` String, `twclid` String, `li_fat_id` String, `mc_cid` String, `igshid` String, `ttclid` String, `rdt_cid` String, `epik` String, `qclid` String, `sccid` String, `irclid` String, `_kx` String, `val_region` String)"
     }
-    column "_unparseable_properties" {
-      type = "String"
-    }
-    column "_unparseable_person_properties" {
-      type = "String"
-    }
-    column "_active_feature_flags" {
-      type = "String"
-    }
     column "group0_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group1_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group2_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group3_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group4_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "person_created_at" {
-      type = "DateTime64(3)"
+      type  = "DateTime64(3)"
+      codec = "GCD, Default"
     }
     column "group0_created_at" {
       type = "DateTime64(3)"
@@ -5631,6 +5616,7 @@ database "posthog" {
     column "inserted_at" {
       type    = "DateTime64(6, 'UTC')"
       default = "now64()"
+      codec   = "GCD, Default"
     }
     column "person_mode" {
       type = "Enum8('full'=0, 'propertyless'=1, 'force_upgrade'=2)"
@@ -5642,46 +5628,17 @@ database "posthog" {
       type = "Bool"
     }
     column "total_event_size" {
-      type = "UInt32"
+      type  = "UInt32"
+      codec = "T64, Default"
     }
     column "captured_at" {
       type    = "DateTime64(6, 'UTC')"
       default = "now()"
+      codec   = "GCD, Default"
     }
     column "_partition" {
-      type = "UInt64"
-    }
-    column "$group_0" {
-      type  = "String"
-      alias = "ifNull(properties.`$group_0`, '')"
-    }
-    column "$group_1" {
-      type  = "String"
-      alias = "ifNull(properties.`$group_1`, '')"
-    }
-    column "$group_2" {
-      type  = "String"
-      alias = "ifNull(properties.`$group_2`, '')"
-    }
-    column "$group_3" {
-      type  = "String"
-      alias = "ifNull(properties.`$group_3`, '')"
-    }
-    column "$group_4" {
-      type  = "String"
-      alias = "ifNull(properties.`$group_4`, '')"
-    }
-    column "$window_id" {
-      type  = "String"
-      alias = "ifNull(properties.`$window_id`, '')"
-    }
-    column "$session_id" {
-      type  = "String"
-      alias = "ifNull(properties.`$session_id`, '')"
-    }
-    column "$session_id_uuid" {
-      type  = "Nullable(UInt128)"
-      alias = "toUInt128(toUUIDOrNull(properties.`$session_id`))"
+      type  = "UInt64"
+      codec = "T64, Default"
     }
     column "elements_chain_href" {
       type         = "String"
@@ -8776,34 +8733,20 @@ database "posthog" {
     column "person_properties" {
       type = "JSON(max_dynamic_paths=0, `$app_version` String, `$app_build` String, `$app_name` String, `$app_namespace` String, `$browser` LowCardinality(String), `$browser_language` String, `$browser_language_prefix` String, `$browser_type` String, `$browser_version` LowCardinality(String), `$current_url` String, `$device` String, `$device_id` String, `$device_manufacturer` String, `$device_model` String, `$device_name` String, `$device_type` LowCardinality(String), `$geoip_continent_name` LowCardinality(String), `$geoip_continent_code` LowCardinality(String), `$geoip_country_code` LowCardinality(String), `$geoip_country_name` LowCardinality(String), `$geoip_city_name` LowCardinality(String), `$geoip_postal_code` String, `$geoip_subdivision_1_code` String, `$geoip_subdivision_1_name` LowCardinality(String), `$geoip_subdivision_2_code` String, `$geoip_subdivision_2_name` String, `$geoip_time_zone` LowCardinality(String), `$initial_current_url` String, `$initial_app_build` String, `$initial_app_name` String, `$initial_app_namespace` String, `$initial_app_version` String, `$initial_browser` LowCardinality(String), `$initial_browser_language` String, `$initial_browser_language_prefix` String, `$initial_browser_type` String, `$initial_browser_version` LowCardinality(String), `$initial_device` String, `$initial_device_id` String, `$initial_device_manufacturer` String, `$initial_device_model` String, `$initial_device_name` String, `$initial_device_type` LowCardinality(String), `$initial_geoip_city_name` String, `$initial_geoip_continent_code` String, `$initial_geoip_continent_name` String, `$initial_geoip_country_code` String, `$initial_geoip_country_name` LowCardinality(String), `$initial_geoip_postal_code` String, `$initial_geoip_subdivision_1_code` String, `$initial_geoip_subdivision_1_name` LowCardinality(String), `$initial_geoip_subdivision_2_code` String, `$initial_geoip_subdivision_2_name` String, `$initial_geoip_time_zone` LowCardinality(String), `$initial_fbclid` String, `$initial_gad_source` String, `$initial_gbraid` String, `$initial_gclid` String, `$initial_gclsrc` String, `$initial_dclid` String, `$initial_msclkid` String, `$initial_twclid` String, `$initial_li_fat_id` String, `$initial_mc_cid` String, `$initial_igshid` String, `$initial_ttclid` String, `$initial_rdt_cid` String, `$initial_epik` String, `$initial_qclid` String, `$initial_sccid` String, `$initial_irclid` String, `$initial__kx` String, `$initial_pathname` String, `$initial_os` LowCardinality(String), `$initial_os_name` String, `$initial_os_version` LowCardinality(String), `$initial_raw_user_agent` LowCardinality(String), `$initial_referrer` String, `$initial_referring_domain` String, `$initial_screen_height` LowCardinality(String), `$initial_screen_width` LowCardinality(String), `$initial_search_engine` String, `$initial_utm_campaign` String, `$initial_utm_content` String, `$initial_utm_medium` String, `$initial_utm_source` String, `$initial_utm_term` String, `$initial_viewport_height` String, `$initial_viewport_width` String, `$initial_wbraid` String, `$os_name` String, `$os` LowCardinality(String), `$os_version` LowCardinality(String), `$pathname` String, `$raw_user_agent` LowCardinality(String), `$referrer` String, `$screen_height` LowCardinality(String), `$screen_width` LowCardinality(String), `$search_engine` String, `$viewport_height` String, `$viewport_width` String, `$referring_domain` String, `$email` String, `$last_seen_survey_date` String, `$organization_id` String, `$product_tour_last_seen_date` String, `$survey_last_seen_date` String, `Email Domain` String, `companyName` String, `customer` String, `email` String, `first_name` String, `hubspot_score` String, `id` String, `icp_role` String, `is_email_verified` String, `is_signed_up` String, `last_name` String, `name` String, `organization_id` String, `organization_member_count` String, `role` String, `role_at_organization` String, `serverMarketing` String, `serverMasterclass` String, `user_email_domain` String, `username` String, `utm_source` String, `utm_medium` String, `utm_campaign` String, `utm_content` String, `utm_term` String, `gclid` String, `gad_source` String, `gclsrc` String, `dclid` String, `gbraid` String, `wbraid` String, `fbclid` String, `msclkid` String, `twclid` String, `li_fat_id` String, `mc_cid` String, `igshid` String, `ttclid` String, `rdt_cid` String, `epik` String, `qclid` String, `sccid` String, `irclid` String, `_kx` String, `val_region` String)"
     }
-    column "_unparseable_properties" {
-      type = "String"
-    }
-    column "_unparseable_person_properties" {
-      type = "String"
-    }
-    column "_active_feature_flags" {
-      type = "String"
-    }
     column "group0_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group1_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group2_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group3_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "group4_properties" {
-      type  = "String"
-      codec = "ZSTD(3)"
+      type = "String"
     }
     column "person_created_at" {
       type = "DateTime64(3)"

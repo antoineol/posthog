@@ -1,7 +1,6 @@
 from django.conf import settings
 
 from posthog.hogql.escape_sql import escape_clickhouse_identifier, escape_clickhouse_string
-from posthog.hogql.functions.udfs import JSON_DROP_KEYS_BASE_NAME, JSON_DROP_KEYS_CLICKHOUSE_NAME
 
 from posthog.clickhouse.base_sql import COPY_ROWS_BETWEEN_TEAMS_BASE_SQL
 from posthog.clickhouse.cluster import ON_CLUSTER_CLAUSE
@@ -32,7 +31,6 @@ from posthog.clickhouse.kafka_engine import (
 )
 from posthog.clickhouse.property_groups import property_groups
 from posthog.clickhouse.table_engines import Distributed, ReplacingMergeTree, ReplicationScheme
-from posthog.cloud_utils import is_cloud
 from posthog.kafka_client.topics import KAFKA_EVENTS_JSON
 
 
@@ -221,7 +219,7 @@ def _json_subcolumn(column: str, path: str) -> str:
     return f"{escape_clickhouse_identifier(column)}.{escape_clickhouse_identifier(path)}"
 
 
-EVENTS_JSON_DATA_COMPATIBILITY_COLUMNS = f"""
+EVENTS_JSON_PROXY_COMPATIBILITY_COLUMNS = f"""
     , $group_0 String ALIAS ifNull({_json_subcolumn("properties", "$group_0")}, '')
     , $group_1 String ALIAS ifNull({_json_subcolumn("properties", "$group_1")}, '')
     , $group_2 String ALIAS ifNull({_json_subcolumn("properties", "$group_2")}, '')
@@ -230,28 +228,14 @@ EVENTS_JSON_DATA_COMPATIBILITY_COLUMNS = f"""
     , $window_id String ALIAS ifNull({_json_subcolumn("properties", "$window_id")}, '')
     , $session_id String ALIAS ifNull({_json_subcolumn("properties", "$session_id")}, '')
     , $session_id_uuid Nullable(UInt128) ALIAS toUInt128(toUUIDOrNull({_json_subcolumn("properties", "$session_id")}))
+"""
+
+EVENTS_JSON_ELEMENTS_COLUMNS = """
     , elements_chain_href String MATERIALIZED extract(elements_chain, '(?::|\")href="(.*?)"')
     , elements_chain_texts Array(String) MATERIALIZED arrayDistinct(extractAll(elements_chain, '(?::|\")text="(.*?)"'))
     , elements_chain_ids Array(String) MATERIALIZED arrayDistinct(extractAll(elements_chain, '(?::|\")attr_id="(.*?)"'))
     , elements_chain_elements Array(Enum('a', 'button', 'form', 'input', 'select', 'textarea', 'label')) MATERIALIZED arrayDistinct(extractAll(elements_chain, '(?:^|;)(a|button|form|input|select|textarea|label)(?:\\.|$|:)'))
 """
-
-
-EVENTS_JSON_PROXY_COMPATIBILITY_COLUMNS = """
-    , $group_0 String
-    , $group_1 String
-    , $group_2 String
-    , $group_3 String
-    , $group_4 String
-    , $window_id String
-    , $session_id String
-    , $session_id_uuid Nullable(UInt128)
-    , elements_chain_href String
-    , elements_chain_texts Array(String)
-    , elements_chain_ids Array(String)
-    , elements_chain_elements Array(Enum('a', 'button', 'form', 'input', 'select', 'textarea', 'label'))
-"""
-
 
 EVENTS_JSON_TABLE_BASE_SQL = """
 CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
@@ -260,39 +244,37 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     event String,
     properties {properties_json_type},
     temporary_properties JSON(max_dynamic_paths = 0){temporary_properties_storage},
-    timestamp DateTime64(6, 'UTC'),
+    timestamp DateTime64(6, 'UTC'){gcd_codec},
     team_id Int64,
     distinct_id String,
     elements_hash String,
-    created_at DateTime64(6, 'UTC') DEFAULT now(),
-    _timestamp DateTime,
-    _offset UInt64,
+    created_at DateTime64(6, 'UTC') DEFAULT now(){gcd_codec},
+    _timestamp DateTime{t64_codec},
+    _offset UInt64{t64_codec},
     elements_chain String,
     person_id UUID,
     person_properties {person_properties_json_type},
-    _unparseable_properties String,
-    _unparseable_person_properties String,
-    _active_feature_flags String,
-    group0_properties String CODEC(ZSTD(3)),
-    group1_properties String CODEC(ZSTD(3)),
-    group2_properties String CODEC(ZSTD(3)),
-    group3_properties String CODEC(ZSTD(3)),
-    group4_properties String CODEC(ZSTD(3)),
-    person_created_at DateTime64(3),
+    group0_properties String,
+    group1_properties String,
+    group2_properties String,
+    group3_properties String,
+    group4_properties String,
+    person_created_at DateTime64(3){gcd_codec},
     group0_created_at DateTime64(3),
     group1_created_at DateTime64(3),
     group2_created_at DateTime64(3),
     group3_created_at DateTime64(3),
     group4_created_at DateTime64(3),
-    inserted_at DateTime64(6, 'UTC') DEFAULT now64(),
+    inserted_at DateTime64(6, 'UTC') DEFAULT now64(){gcd_codec},
     person_mode Enum8('full' = 0, 'propertyless' = 1, 'force_upgrade' = 2),
     consumer_breadcrumbs Array(String),
     historical_migration Bool,
-    total_event_size UInt32,
-    captured_at DateTime64(6, 'UTC') DEFAULT now(),
-    _partition UInt64
-    {compatibility_columns}
-    {indexes}
+    total_event_size UInt32{t64_codec},
+    captured_at DateTime64(6, 'UTC') DEFAULT now(){gcd_codec},
+    _partition UInt64{t64_codec}
+{elements_columns}
+{compatibility_columns}
+{indexes}
 ) ENGINE = {engine}
 """
 
@@ -302,7 +284,7 @@ def EVENTS_JSON_TABLE_SQL(on_cluster: bool = False) -> str:
         EVENTS_JSON_TABLE_BASE_SQL
         + """PARTITION BY clamp(toYYYYMM(timestamp), 202001, 203512)
 PRIMARY KEY (team_id, toDate(timestamp), event, cityHash64(distinct_id))
-ORDER BY (team_id, toDate(timestamp), event, cityHash64(distinct_id), distinct_id, timestamp, uuid)
+ORDER BY (team_id, toDate(timestamp), event, cityHash64(distinct_id), timestamp, uuid)
 SAMPLE BY cityHash64(distinct_id)
 SETTINGS index_granularity = 8192, object_serialization_version = 'v3', object_shared_data_serialization_version = 'map_with_buckets', enable_block_offset_column = 1, enable_block_number_column = 1, map_serialization_version = 'with_buckets', string_serialization_version = 'single_stream', propagate_types_serialization_versions_to_nested_types = 1
 """
@@ -313,7 +295,10 @@ SETTINGS index_granularity = 8192, object_serialization_version = 'v3', object_s
         properties_json_type=EVENTS_PROPERTIES_JSON_TYPE(),
         person_properties_json_type=PERSON_PROPERTIES_JSON_TYPE(),
         temporary_properties_storage=" TTL toDateTime(inserted_at) + INTERVAL 60 DAY",
-        compatibility_columns=EVENTS_JSON_DATA_COMPATIBILITY_COLUMNS,
+        gcd_codec=" CODEC(GCD, Default)",
+        t64_codec=" CODEC(T64, Default)",
+        elements_columns=EVENTS_JSON_ELEMENTS_COLUMNS,
+        compatibility_columns="",
         indexes=EVENTS_JSON_DATA_TABLE_INDEXES(),
     )
 
@@ -326,6 +311,9 @@ def WRITABLE_EVENTS_JSON_TABLE_SQL(on_cluster: bool = False) -> str:
         properties_json_type=EVENTS_PROPERTIES_JSON_TYPE(),
         person_properties_json_type=PERSON_PROPERTIES_JSON_TYPE(),
         temporary_properties_storage="",
+        gcd_codec="",
+        t64_codec="",
+        elements_columns="",
         compatibility_columns="",
         indexes="",
     )
@@ -339,7 +327,16 @@ def DISTRIBUTED_EVENTS_JSON_TABLE_SQL(on_cluster: bool = False) -> str:
         properties_json_type=EVENTS_PROPERTIES_JSON_TYPE(),
         person_properties_json_type=PERSON_PROPERTIES_JSON_TYPE(),
         temporary_properties_storage="",
-        compatibility_columns=EVENTS_JSON_PROXY_COMPATIBILITY_COLUMNS,
+        gcd_codec="",
+        t64_codec="",
+        elements_columns="",
+        compatibility_columns=EVENTS_JSON_PROXY_COMPATIBILITY_COLUMNS
+        + """
+    , elements_chain_href String
+    , elements_chain_texts Array(String)
+    , elements_chain_ids Array(String)
+    , elements_chain_elements Array(Enum('a', 'button', 'form', 'input', 'select', 'textarea', 'label'))
+""",
         indexes="",
     )
 
@@ -501,26 +498,10 @@ def EVENTS_JSON_TABLE_MV_SQL(
     if target_table is None:
         target_table = WRITABLE_EVENTS_JSON_TABLE
 
-    properties_type = EVENTS_PROPERTIES_JSON_TYPE()
-    person_properties_type = PERSON_PROPERTIES_JSON_TYPE()
-    marker = escape_clickhouse_string(UNPARSEABLE_PROPERTIES_KEY)
-
     return """
 CREATE MATERIALIZED VIEW IF NOT EXISTS {mv_name} {on_cluster_clause}
 TO {database}.{target_table}
 AS
-WITH
-{properties_expr} AS cleaned_properties,
-{person_properties_expr} AS cleaned_person_properties,
-if(
-    JSONType(source.properties, '$active_feature_flags') = 'Array',
-    JSONExtractRaw(source.properties, '$active_feature_flags'),
-    ''
-) AS _active_feature_flags,
-{json_drop_keys}([{marker}])(cleaned_properties) AS visible_properties,
-{json_drop_keys}([{marker}])(cleaned_person_properties) AS visible_person_properties,
-accurateCastOrNull(visible_properties, {properties_type}) AS typed_properties,
-accurateCastOrNull(visible_person_properties, {person_properties_type}) AS typed_person_properties
 SELECT
 *,
 accurateCast(byteSize(*) + byteSize(toUInt32(0)), 'UInt32') AS total_event_size
@@ -529,7 +510,7 @@ FROM
 SELECT
 uuid,
 event,
-ifNull(typed_properties, defaultValueOfArgumentType(assumeNotNull(typed_properties))) AS properties,
+{properties_expr} AS properties,
 JSONCleanPostHogTemporaryProperties(if(isValidJSON(source.properties) AND startsWith(trimLeft(source.properties), '{{'), source.properties, '{{}}')) AS temporary_properties,
 now64() AS inserted_at,
 timestamp,
@@ -538,13 +519,7 @@ distinct_id,
 elements_chain,
 created_at,
 person_id,
-ifNull(
-    typed_person_properties,
-    defaultValueOfArgumentType(assumeNotNull(typed_person_properties))
-) AS person_properties,
-if(isNull(typed_properties), source.properties, JSONExtractString(cleaned_properties, {marker})) AS _unparseable_properties,
-if(isNull(typed_person_properties), source.person_properties, JSONExtractString(cleaned_person_properties, {marker})) AS _unparseable_person_properties,
-_active_feature_flags,
+{person_properties_expr} AS person_properties,
 person_created_at,
 group0_properties,
 group1_properties,
@@ -579,10 +554,6 @@ FROM {database}.{kafka_table} AS source
         database=settings.CLICKHOUSE_DATABASE,
         properties_expr=_clean_properties("source.properties", "JSONCleanPostHogEventProperties"),
         person_properties_expr=_clean_properties("source.person_properties", "JSONCleanPostHogPersonProperties"),
-        json_drop_keys=JSON_DROP_KEYS_CLICKHOUSE_NAME if is_cloud() else JSON_DROP_KEYS_BASE_NAME,
-        marker=marker,
-        properties_type=escape_clickhouse_string(properties_type),
-        person_properties_type=escape_clickhouse_string(person_properties_type),
     )
 
 
