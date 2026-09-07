@@ -259,6 +259,7 @@ CREATE TABLE IF NOT EXISTS {table_name} {on_cluster_clause}
     uuid UUID,
     event String,
     properties {properties_json_type},
+    temporary_properties JSON(max_dynamic_paths = 0){temporary_properties_storage},
     timestamp DateTime64(6, 'UTC'),
     team_id Int64,
     distinct_id String,
@@ -303,7 +304,7 @@ def EVENTS_JSON_TABLE_SQL(on_cluster: bool = False) -> str:
 PRIMARY KEY (team_id, toDate(timestamp), event, cityHash64(distinct_id))
 ORDER BY (team_id, toDate(timestamp), event, cityHash64(distinct_id), distinct_id, timestamp, uuid)
 SAMPLE BY cityHash64(distinct_id)
-SETTINGS index_granularity = 8192, object_serialization_version = 'v3', object_shared_data_serialization_version = 'map_with_buckets', enable_block_offset_column = 1, enable_block_number_column = 1, map_serialization_version = 'with_buckets'
+SETTINGS index_granularity = 8192, object_serialization_version = 'v3', object_shared_data_serialization_version = 'map_with_buckets', enable_block_offset_column = 1, enable_block_number_column = 1, map_serialization_version = 'with_buckets', string_serialization_version = 'single_stream', propagate_types_serialization_versions_to_nested_types = 1
 """
     ).format(
         table_name=EVENTS_JSON_DATA_TABLE,
@@ -311,6 +312,7 @@ SETTINGS index_granularity = 8192, object_serialization_version = 'v3', object_s
         engine=EVENTS_JSON_DATA_TABLE_ENGINE(),
         properties_json_type=EVENTS_PROPERTIES_JSON_TYPE(),
         person_properties_json_type=PERSON_PROPERTIES_JSON_TYPE(),
+        temporary_properties_storage=" TTL toDateTime(inserted_at) + INTERVAL 60 DAY",
         compatibility_columns=EVENTS_JSON_DATA_COMPATIBILITY_COLUMNS,
         indexes=EVENTS_JSON_DATA_TABLE_INDEXES(),
     )
@@ -323,6 +325,7 @@ def WRITABLE_EVENTS_JSON_TABLE_SQL(on_cluster: bool = False) -> str:
         engine=Distributed(data_table=EVENTS_JSON_DATA_TABLE, sharding_key="sipHash64(distinct_id)"),
         properties_json_type=EVENTS_PROPERTIES_JSON_TYPE(),
         person_properties_json_type=PERSON_PROPERTIES_JSON_TYPE(),
+        temporary_properties_storage="",
         compatibility_columns="",
         indexes="",
     )
@@ -335,6 +338,7 @@ def DISTRIBUTED_EVENTS_JSON_TABLE_SQL(on_cluster: bool = False) -> str:
         engine=Distributed(data_table=EVENTS_JSON_DATA_TABLE, sharding_key="sipHash64(distinct_id)"),
         properties_json_type=EVENTS_PROPERTIES_JSON_TYPE(),
         person_properties_json_type=PERSON_PROPERTIES_JSON_TYPE(),
+        temporary_properties_storage="",
         compatibility_columns=EVENTS_JSON_PROXY_COMPATIBILITY_COLUMNS,
         indexes="",
     )
@@ -526,6 +530,8 @@ SELECT
 uuid,
 event,
 ifNull(typed_properties, defaultValueOfArgumentType(assumeNotNull(typed_properties))) AS properties,
+JSONCleanPostHogTemporaryProperties(if(isValidJSON(source.properties) AND startsWith(trimLeft(source.properties), '{{'), source.properties, '{{}}')) AS temporary_properties,
+now64() AS inserted_at,
 timestamp,
 team_id,
 distinct_id,
