@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -158,9 +158,13 @@ def read_outcome_once(*, team_id: int, outcome_id: UUID) -> OutcomeReadResult:
 def observed_window_for_baseline(
     *, adopted_at: datetime, baseline_from: date, baseline_to: date
 ) -> tuple[datetime, datetime]:
-    """Return an inclusive full-day window with the frozen calendar span."""
+    """Return a UTC-calendar-aligned inclusive window with the frozen span."""
     days = (baseline_to - baseline_from).days + 1
-    return adopted_at, adopted_at + timedelta(days=days) - timedelta(microseconds=1)
+    if adopted_at.tzinfo is None:
+        observed_from = datetime.combine(adopted_at.date(), time.min)
+    else:
+        observed_from = datetime.combine(adopted_at.astimezone(UTC).date(), time.min, tzinfo=UTC)
+    return observed_from, observed_from + timedelta(days=days) - timedelta(microseconds=1)
 
 
 def verdict_for_measurement(*, baseline: Decimal, observed: Decimal, direction: str) -> OutcomeVerdict:

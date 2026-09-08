@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from posthog.test.base import BaseTest
 from unittest.mock import patch
 
@@ -156,3 +158,18 @@ class TestSavedInsightMeasurement(BaseTest):
     def test_measurement_hides_query_errors(self, query) -> None:
         assert self._measure().status == "query_error"
         query.assert_called_once()
+
+    @patch("posthog.api.services.query.process_query_model")
+    def test_measurement_uses_all_and_only_the_calendar_aligned_observed_dates(self, query) -> None:
+        query.return_value = {"results": [{"count": 3}]}
+
+        result = self._measure(
+            date_from=datetime(2026, 9, 8, tzinfo=UTC),
+            date_to=datetime(2026, 9, 14, 23, 59, 59, 999999, tzinfo=UTC),
+        )
+
+        assert result.status == "success"
+        executed_query = query.call_args.args[1]
+        assert executed_query.dateRange is not None
+        assert executed_query.dateRange.date_from == "2026-09-08"
+        assert executed_query.dateRange.date_to == "2026-09-14"

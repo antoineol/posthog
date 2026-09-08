@@ -25,22 +25,33 @@ from products.subscriptions.backend.models import (
 
 
 @pytest.mark.parametrize(
-    ("baseline_from", "baseline_to", "expected_end"),
+    ("baseline_from", "baseline_to", "expected_window"),
     [
-        (date(2026, 9, 1), date(2026, 9, 1), datetime(2026, 9, 9, 11, 29, 59, 999999)),
-        (date(2026, 9, 1), date(2026, 9, 7), datetime(2026, 9, 15, 11, 29, 59, 999999)),
+        (
+            date(2026, 9, 1),
+            date(2026, 9, 1),
+            (datetime(2026, 9, 8, tzinfo=UTC), datetime(2026, 9, 8, 23, 59, 59, 999999, tzinfo=UTC)),
+        ),
+        (
+            date(2026, 9, 1),
+            date(2026, 9, 7),
+            (datetime(2026, 9, 8, tzinfo=UTC), datetime(2026, 9, 14, 23, 59, 59, 999999, tzinfo=UTC)),
+        ),
     ],
 )
 def test_observed_window_keeps_the_frozen_inclusive_calendar_span(
-    baseline_from: date, baseline_to: date, expected_end: datetime
+    baseline_from: date, baseline_to: date, expected_window: tuple[datetime, datetime]
 ) -> None:
-    observed_from = datetime(2026, 9, 8, 11, 30)
+    observed_from = datetime(2026, 9, 8, 11, 30, tzinfo=UTC)
 
-    assert observed_window_for_baseline(
-        adopted_at=observed_from,
-        baseline_from=baseline_from,
-        baseline_to=baseline_to,
-    ) == (observed_from, expected_end)
+    assert (
+        observed_window_for_baseline(
+            adopted_at=observed_from,
+            baseline_from=baseline_from,
+            baseline_to=baseline_to,
+        )
+        == expected_window
+    )
 
 
 @pytest.mark.parametrize(
@@ -194,6 +205,8 @@ def test_due_read_queries_outside_the_terminal_write_lock(team, monkeypatch) -> 
     outcome = ProactiveRecommendationOutcome.objects.for_team(team.id).get(id=provisioned.outcome_id)
     assert outcome.status == ProactiveRecommendationOutcome.Status.IMPROVED
     assert outcome.observed_to is not None
+    assert outcome.observed_from is not None
+    assert outcome.observed_from.time() == datetime.min.time()
     assert outcome.observed_to - outcome.observed_from == timedelta(days=7) - timedelta(microseconds=1)
 
 
