@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from django.db.models import Q
+from django.utils import timezone
 
 import structlog
 from celery import shared_task
@@ -33,7 +34,13 @@ def reconcile_proactive_artifact_adoptions() -> None:
                     ProactivePreparedArtifact.Status.PREPARING,
                     ProactivePreparedArtifact.Status.PREPARED,
                 ],
-                task_publication_id__isnull=False,
+            )
+            & (
+                Q(task_publication_id__isnull=False)
+                | Q(
+                    status=ProactivePreparedArtifact.Status.PREPARED,
+                    prior_artifact_id__isnull=False,
+                )
             )
             | Q(
                 kind=ProactivePreparedArtifact.Kind.EXPERIMENT_DRAFT,
@@ -41,7 +48,7 @@ def reconcile_proactive_artifact_adoptions() -> None:
                 experiment_id__isnull=False,
             )
         )
-        .order_by("created_at", "id")
+        .order_by("updated_at", "id")
         .values_list("team_id", "id")[:_ADOPTION_RECONCILIATION_BATCH_SIZE]
     )
     for team_id, artifact_id in candidates:
@@ -53,3 +60,5 @@ def reconcile_proactive_artifact_adoptions() -> None:
                 team_id=team_id,
                 artifact_id=str(artifact_id),
             )
+        finally:
+            ProactivePreparedArtifact.objects.for_team(team_id).filter(id=artifact_id).update(updated_at=timezone.now())
