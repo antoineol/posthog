@@ -56,6 +56,10 @@ export interface AgentServerConfig {
   baseBranch?: string;
   claudeCode?: ClaudeCodeConfig;
   allowedDomains?: string[];
+  /** Server-enforced tool denylist for a protected staged run. */
+  disabledTools?: string[];
+  /** Ignore ambient Claude settings and MCP configuration for protected sessions. */
+  strictMcpConfig?: boolean;
   piRpcHostPath?: string;
   runtimeAdapter?: Adapter;
   model?: string;

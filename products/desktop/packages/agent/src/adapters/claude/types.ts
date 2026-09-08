@@ -244,6 +244,10 @@ export type NewSessionMeta = {
   persistence?: { taskId?: string; runId?: string; logUrl?: string };
   additionalRoots?: string[];
   allowedDomains?: string[];
+  /** Server-enforced tools that this session must never invoke. */
+  disabledTools?: string[];
+  /** Server-controlled protected session: ambient settings and MCP servers are ignored. */
+  strictMcpConfig?: boolean;
   /** Model ID to use for this session (e.g. "claude-sonnet-4-6") */
   model?: string;
   /** Context window choice for 1M-capable models; unset means the 1M default. */
