@@ -1947,6 +1947,27 @@ describe('exec tool', () => {
                 expect(message).toMatch(/\.\.\. \(\d+ accepted values\)/)
             })
 
+            // A variant can pin a second field to one value without that field
+            // selecting the variant, so the shortest-branch guess reported the
+            // `type` the caller got right as the field to rewrite.
+            it.each([
+                [
+                    'a flag filter with the wrong operator',
+                    { type: 'flag', key: 'new-onboarding', operator: 'exact', value: true },
+                    'parameter "properties.0.operator"',
+                ],
+                [
+                    'a cohort filter with the wrong key',
+                    { type: 'cohort', key: 'cohort_id', operator: 'in', value: 42 },
+                    'parameter "properties.0.key"',
+                ],
+            ])('names the field to change on %s, not its type', (_label, filter, expected) => {
+                const message = formatFor({ series: [{ event: '$pageview' }], properties: [filter] })
+
+                expect(message).toContain(expected)
+                expect(message).not.toContain('parameter "properties.0.type"')
+            })
+
             it('descends through a nested union to the field that failed', () => {
                 const message = formatFor({
                     series: [

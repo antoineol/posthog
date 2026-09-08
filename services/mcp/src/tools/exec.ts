@@ -598,12 +598,75 @@ const MAX_UNION_ISSUES_NAMED = 3
 const MAX_UNION_VALUES_NAMED = 10
 const MAX_UNION_DEPTH = 3
 
-/** Whether a branch rejected the caller's own discriminator, meaning it
- *  describes a different variant than the one the caller named. */
-function rejectsTheDiscriminator(branch: readonly z.core.$ZodIssue[]): boolean {
-    return branch.some(
-        (issue) => issue.code === 'invalid_value' && issue.path.length === 1 && issue.values.length === 1
-    )
+/** The keys a branch rejects because the schema fixes their value, looking
+ *  through a branch that is itself a union: a key one inner variant accepts stays
+ *  reachable through that branch. */
+function rejectedValueKeys(branch: readonly z.core.$ZodIssue[], depth = 0): Set<string> {
+    const keys = new Set<string>()
+    for (const issue of branch) {
+        if (issue.code === 'invalid_value' && issue.path.length === 1) {
+            keys.add(String(issue.path[0]))
+        } else if (issue.code === 'invalid_union' && issue.path.length === 0 && depth < MAX_UNION_DEPTH) {
+            const nested = issue.errors.map((inner) => rejectedValueKeys(inner, depth + 1))
+            for (const key of nested[0] ?? []) {
+                if (nested.every((set) => set.has(key))) {
+                    keys.add(key)
+                }
+            }
+        }
+    }
+    return keys
+}
+
+/** The keys a branch fixes to one value, so `{key: value}` picks it out of the
+ *  union. A branch that is itself a union pins what all of its own variants pin —
+ *  every variant of a group property filter pins `type` to `group`. */
+function pinnedValues(branch: readonly z.core.$ZodIssue[], depth = 0): Map<string, string> {
+    const pins = new Map<string, string>()
+    for (const issue of branch) {
+        if (issue.code === 'invalid_value' && issue.path.length === 1 && issue.values.length === 1) {
+            pins.set(String(issue.path[0]), String(issue.values[0]))
+        } else if (issue.code === 'invalid_union' && issue.path.length === 0 && depth < MAX_UNION_DEPTH) {
+            const nested = issue.errors.map((inner) => pinnedValues(inner, depth + 1))
+            for (const [key, value] of nested[0] ?? []) {
+                if (nested.every((map) => map.get(key) === value)) {
+                    pins.set(key, value)
+                }
+            }
+        }
+    }
+    return pins
+}
+
+/**
+ * The key the union switches on, read across the branches: each variant fixes the
+ * discriminator to a different value, so one key pinned to several values is the
+ * signature of the key that selected between them.
+ *
+ * Derived across branches rather than taken from one, because a variant can fix a
+ * second key to a single value without that key selecting anything: a flag
+ * property filter pins `operator` to `flag_evaluates_to`, and a cohort filter pins
+ * `key` to `id`. Reading either as the selector drops the variant the caller meant
+ * and reports its `type` as the field to rewrite.
+ */
+function discriminatorKey(branches: readonly (readonly z.core.$ZodIssue[])[]): string | undefined {
+    const pinned = new Map<string, Set<string>>()
+    for (const branch of branches) {
+        for (const [key, value] of pinnedValues(branch)) {
+            const values = pinned.get(key) ?? new Set<string>()
+            values.add(value)
+            pinned.set(key, values)
+        }
+    }
+    let selector: string | undefined
+    let widest = 1
+    for (const [key, values] of pinned) {
+        if (values.size > widest) {
+            selector = key
+            widest = values.size
+        }
+    }
+    return selector
 }
 
 /**
@@ -616,7 +679,15 @@ function rejectsTheDiscriminator(branch: readonly z.core.$ZodIssue[]): boolean {
  */
 function bestUnionBranch(branches: readonly (readonly z.core.$ZodIssue[])[]): readonly z.core.$ZodIssue[] | undefined {
     const populated = branches.filter((branch) => branch.length > 0)
-    const named = populated.filter((branch) => !rejectsTheDiscriminator(branch))
+    const selector = discriminatorKey(populated)
+    // Once the selector is known, the caller's own value for it picks the
+    // variant. Where no key selects anything, keep the variants that pin nothing
+    // the caller contradicted, so a `breakdowns` entry still hears the whole type
+    // list its generic variant takes rather than the one its group variant pins.
+    const named =
+        selector === undefined
+            ? populated.filter((branch) => pinnedValues(branch).size === 0)
+            : populated.filter((branch) => !rejectedValueKeys(branch).has(selector))
     let best: readonly z.core.$ZodIssue[] | undefined
     for (const branch of named.length > 0 ? named : populated) {
         if (best === undefined || branch.length < best.length) {
