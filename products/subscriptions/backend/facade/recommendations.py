@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import hashlib
 from collections.abc import Mapping
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from posthog.dataclasses import frozen
@@ -31,6 +31,7 @@ RecommendationStatus = Literal["pending", "completed", "failed"]
 class RecommendationContext:
     id: str
     content: str
+    citable: bool = True
 
 
 @frozen
@@ -200,7 +201,7 @@ def start_recommendation_generation(input: RecommendationGenerationInput) -> Rec
                 phase="analysis",
                 mcp_scope_preset="pulse_analysis" if input.public_web_research else "pulse_analysis_no_research",
                 disabled_tools=PULSE_ANALYSIS_DISABLED_TOOLS,
-                network_egress=PULSE_ANALYSIS_NETWORK_EGRESS,
+                network_egress=cast(Literal["inherit", "posthog_mcp_only"], PULSE_ANALYSIS_NETWORK_EGRESS),
             ),
             repository=input.repository,
             output_schema=_RECOMMENDATION_OUTPUT_SCHEMA,
@@ -257,6 +258,7 @@ def _citation_metadata(
         {
             context.id: RecommendationCitation(id=context.id, title=f"Context: {context.id}")
             for context in input.contexts
+            if context.citable
         }
     )
     for call in calls:
@@ -416,13 +418,13 @@ def _parse_recommendation(raw_recommendation: object) -> Recommendation:
     metric_name = _required_text(raw_recommendation, "metric_name")
     metric_direction = _required_text(raw_recommendation, "metric_direction")
     return Recommendation(
-        kind=kind,
+        kind=cast(RecommendationKind, kind),
         title=_required_text(raw_recommendation, "title"),
         rationale=_required_text(raw_recommendation, "rationale"),
         target=target,
         why_now=_required_text(raw_recommendation, "why_now"),
         confidence=float(confidence),
-        effort=effort,
+        effort=cast(RecommendationEffort, effort),
         metric_name=metric_name,
         metric_direction=metric_direction,
         expected_metric_movement=_required_text(raw_recommendation, "expected_metric_movement"),
