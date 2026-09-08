@@ -40,6 +40,26 @@ function jsonExamples(description: string): unknown[] {
     return examples
 }
 
+/** Every field the example sets that the parsed input no longer carries. */
+function droppedFields(sent: unknown, accepted: unknown, trail = ''): string[] {
+    if (Array.isArray(sent)) {
+        return Array.isArray(accepted)
+            ? sent.flatMap((item, index) => droppedFields(item, accepted[index], `${trail}[${index}]`))
+            : [trail]
+    }
+    if (typeof sent !== 'object' || sent === null) {
+        return []
+    }
+    if (typeof accepted !== 'object' || accepted === null) {
+        return [trail]
+    }
+    return Object.entries(sent).flatMap(([key, value]) => {
+        const path = trail ? `${trail}.${key}` : key
+        const held = accepted as Record<string, unknown>
+        return key in held ? droppedFields(value, held[key], path) : [path]
+    })
+}
+
 const mockContext = { getDistinctId: async () => 'test-distinct-id' } as unknown as Context
 
 /** The generated tool with its handler replaced, so a `call` exercises the
@@ -91,6 +111,21 @@ describe('tools that take their query fields at the top level', () => {
                 .catch((error: Error) => `rejected: ${error.message}`)
 
             expect(String(output)).not.toContain('Invalid input')
+        }
+    })
+
+    // Parsing alone does not prove an example works: these schemas drop fields
+    // they do not declare, so an example naming one is accepted and then quietly
+    // loses it. Scoped to trends — `query-funnel` documents `name` on a grouped
+    // step's inner nodes, and its schema drops that.
+    it('query-trends documents examples that keep every field they set', () => {
+        const tool = GENERATED_TOOL_MAP['query-trends']!()
+
+        for (const example of jsonExamples(definitions['query-trends']?.description ?? '')) {
+            const result = tool.schema.safeParse(example)
+
+            expect(result.success).toBe(true)
+            expect(droppedFields(example, result.data)).toEqual([])
         }
     })
 

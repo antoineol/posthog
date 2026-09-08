@@ -284,7 +284,7 @@ Examples of using breakdowns:
   "interval": "day",
   "properties": [{ "key": "$geoip_country_name", "operator": "exact", "type": "event", "value": ["United States"] }],
   "compareFilter": { "compare": true },
-  "trendsFilter": { "display": "ActionsLineGraph", "formula": "A/B", "aggregationAxisFormat": "percentage_scaled" }
+  "trendsFilter": { "display": "ActionsLineGraph", "formulaNodes": [{ "formula": "A/B" }], "aggregationAxisFormat": "percentage_scaled" }
 }
 ```
 
