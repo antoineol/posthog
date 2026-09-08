@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { useDebouncedCallback } from 'use-debounce'
 
 export interface DebouncedDraft {
@@ -44,9 +45,9 @@ export function useDebouncedDraft(externalValue: string, sync: (value: string) =
             debouncedSync(next)
         },
         submit: (send: () => void): void => {
-            // Flush the pending keystroke synchronously so the send reads the latest draft, not the stale
-            // debounced value; a no-op when nothing is pending (kea already has it).
-            debouncedSync.flush()
+            // Commit the draft before send can clear it. Batching both writes can hide the external
+            // value change from the mirroring effect, leaving submitted text in the local echo.
+            flushSync(() => debouncedSync.flush())
             send()
         },
     }
