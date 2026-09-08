@@ -148,7 +148,7 @@ def resolve_draft_repository_binding(
         return None
     repositories = list_authorizable_repositories(team_id=team_id, actor_id=actor_id)
     if not any(
-        repository.repository.casefold() == config.repository.casefold()
+        _repository_identity(repository.repository) == _repository_identity(config.repository)
         and (
             config.repository_integration_id is None
             or repository.github_integration_id == config.repository_integration_id
@@ -379,11 +379,19 @@ def _is_valid_repository_binding_payload(payload: object, input: RecommendationG
     }
     if set(payload) != expected_fields:
         return False
-    if input.repository_name is not None and payload["repository"] != input.repository_name:
+    if input.repository_name is not None and (
+        not isinstance(payload["repository"], str)
+        or _repository_identity(payload["repository"]) != _repository_identity(input.repository_name)
+    ):
         return False
     return all(
         isinstance(payload[key], str) and payload[key] for key in expected_fields - {"github_integration_id"}
     ) and isinstance(payload["github_integration_id"], int)
+
+
+def _repository_identity(repository: str) -> str:
+    """Compare repository names using GitHub's case-insensitive identity."""
+    return repository.casefold()
 
 
 def recent_recommendation_memory(*, team_id: int, subscription_id: int) -> tuple[RecommendationMemoryDTO, ...]:

@@ -370,6 +370,58 @@ def test_generation_persists_and_reuses_its_exact_immutable_handles(team, monkey
 
 
 @pytest.mark.django_db
+def test_pending_generation_reuses_canonical_binding_for_mixed_case_repository_config(team, monkeypatch) -> None:
+    delivery_id = uuid4()
+    binding = StagedRepositoryBinding(
+        repository="posthog/posthog",
+        base_sha="a" * 40,
+        base_branch="master",
+        github_integration_id=123,
+        github_user_integration_id=uuid4(),
+        github_installation_id="456",
+        grant_version="stable-grant",
+    )
+    generation_input = RecommendationGenerationInput(
+        team_id=team.id,
+        subscription_id=123,
+        delivery_id=delivery_id,
+        actor_id=456,
+        idempotency_key=f"pulse-recommendations:{delivery_id}",
+        report_markdown="saved report",
+        prompt="find improvements",
+        contexts=(),
+        public_web_research=False,
+        create_draft_pr=True,
+        repository_name="PostHog/posthog",
+        repository_integration_id=123,
+        repository=binding,
+    )
+    claimed = claim_recommendation_run(
+        team_id=team.id,
+        subscription_id=123,
+        delivery_id=delivery_id,
+        actor_id=456,
+        snapshot={"report_hash": "stable"},
+    )
+    handle = RecommendationGenerationHandle(staged_run_id=uuid4(), task_id=uuid4(), analysis_run_id=uuid4())
+    started_inputs: list[RecommendationGenerationInput] = []
+    monkeypatch.setattr(
+        proactive,
+        "start_recommendation_generation",
+        lambda started_input: started_inputs.append(started_input) or handle,
+    )
+
+    first = proactive._start_or_reuse_recommendation_generation(input=generation_input, run_id=claimed.id)
+    replay = proactive._start_or_reuse_recommendation_generation(input=generation_input, run_id=claimed.id)
+
+    run = proactive.ProactiveRecommendationRun.objects.for_team(team.id).get(id=claimed.id)
+    assert run.status == "pending"
+    assert first == handle
+    assert replay == handle
+    assert started_inputs == [generation_input]
+
+
+@pytest.mark.django_db
 def test_repository_consent_is_resolved_through_the_tasks_facade(team, monkeypatch) -> None:
     config = proactive.ProactiveConfigDTO(
         enabled=True,
