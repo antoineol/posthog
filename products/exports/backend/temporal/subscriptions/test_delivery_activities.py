@@ -45,6 +45,10 @@ from products.exports.backend.temporal.subscriptions.workflows import (
     ProcessSubscriptionWorkflow,
 )
 from products.product_analytics.backend.facade.models import Insight
+from products.subscriptions.backend.facade.temporal import (
+    PREPARE_PROACTIVE_ARTIFACT_WORKFLOW_NAME,
+    ProactiveArtifactPreparationInput,
+)
 
 from ee.tasks.test.subscriptions.subscriptions_test_factory import create_subscription
 
@@ -257,6 +261,49 @@ async def test_process_ai_subscription_delivers_when_pulse_adapter_fails() -> No
         )
 
     assert delivered
+
+
+async def test_process_ai_subscription_ignores_artifact_child_start_failure_after_delivery() -> None:
+    delivered = False
+    recommendation_run_id = uuid.uuid4()
+
+    async def fake_execute_activity(activity, _inputs, **_kwargs):
+        nonlocal delivered
+        if activity is create_delivery_record:
+            return uuid.uuid4()
+        if activity is validate_subscription_for_delivery:
+            return None
+        if activity is generate_ai_subscription_report:
+            return GenerateAIReportResult(target_type="email")
+        if activity is enrich_ai_subscription_report:
+            return recommendation_run_id
+        if activity in (deliver_subscription, deliver_subscription_v2):
+            delivered = True
+            return DeliverSubscriptionResult()
+        if activity in (update_delivery_record, advance_next_delivery_date):
+            return None
+        raise AssertionError(f"unexpected activity {activity}")
+
+    with (
+        patch("temporalio.workflow.execute_activity", side_effect=fake_execute_activity),
+        patch(
+            "temporalio.workflow.start_child_workflow", side_effect=RuntimeError("worker unavailable")
+        ) as start_child,
+        patch("temporalio.workflow.patched", return_value=False),
+        patch("temporalio.workflow.info", return_value=MagicMock(workflow_id="wf-test-ai")),
+        patch("temporalio.workflow.uuid4", return_value=uuid.uuid4()),
+        patch("temporalio.workflow.logger", MagicMock()),
+    ):
+        await ProcessAISubscriptionWorkflow().run(
+            TrackedSubscriptionInputs(subscription_id=1, team_id=1, distinct_id="u1")
+        )
+
+    assert delivered
+    assert start_child.await_count == 1
+    assert start_child.await_args.args == (
+        PREPARE_PROACTIVE_ARTIFACT_WORKFLOW_NAME,
+        ProactiveArtifactPreparationInput(team_id=1, run_id=recommendation_run_id),
+    )
 
 
 @pytest.mark.parametrize(
