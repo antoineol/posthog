@@ -404,17 +404,13 @@ function looksLikeUnwrappedPayload(
 }
 
 /**
- * Detects the mirror mistake: the caller wrapped a whole valid payload in one
- * object — `{query: {series, dateRange}}` — for a tool that takes those fields at
- * the top level. Zod strips the undeclared wrapper, so the rejection reads as a
- * bare `missing required parameter` for a field the caller did send, one level
- * down, and the caller has nothing to correct.
+ * The mirror of `looksLikeUnwrappedPayload`: the caller nested a whole valid
+ * payload under one key, for a tool that takes those fields at the top level.
+ * Zod strips the undeclared wrapper, so the rejection names a field the caller
+ * did send, one level down, and the caller has nothing to correct.
  *
- * Decided by re-parsing, like `looksLikeUnwrappedPayload`: unwrap the candidate
- * and see whether the schema recognizes its contents. Confident when the
- * unwrapped value parses, or fails only on fields the wrapper actually holds —
- * both mean the wrapping was the mistake. Returns the wrapper key, so the
- * message can name it.
+ * Confident when the unwrapped value parses, or fails only on fields the wrapper
+ * holds, because both mean the schema read the contents.
  */
 function overWrappedPayloadKey(input: unknown, schema: ZodObjectAny | undefined): string | undefined {
     if (!schema || !isRecord(input)) {
@@ -439,14 +435,6 @@ function overWrappedPayloadKey(input: unknown, schema: ZodObjectAny | undefined)
     return undefined
 }
 
-/**
- * Renders the top-level shape the tool accepts, from the keys the caller nested
- * inside its wrapper: `{"series": ..., "dateRange": ...}`.
- *
- * Only keys the schema itself declares are named, so the shape is the tool's own
- * vocabulary, and values are always elided — the message is returned to the
- * caller and recorded as the analytics error message.
- */
 function acceptedTopLevelShape(nested: unknown, schema: ZodObjectAny | undefined): string {
     if (!schema || !isRecord(nested)) {
         return '{...}'
@@ -482,7 +470,6 @@ function wrapperFieldNames(schema: ZodObjectAny, key: string): ReadonlySet<strin
     return names
 }
 
-/** The property names a tool's schema declares at the top level. */
 function topLevelFieldNames(schema: ZodObjectAny): ReadonlySet<string> {
     const root = inputJsonSchema(schema)
     const properties = isRecord(root) ? root['properties'] : undefined
@@ -490,7 +477,7 @@ function topLevelFieldNames(schema: ZodObjectAny): ReadonlySet<string> {
 }
 
 /** An object shape written from field names alone, capped, with every value
- *  elided — the message carries the tool's vocabulary, never caller input. */
+ *  elided, so the message carries the tool's vocabulary and no caller input. */
 function renderFieldShape(names: readonly string[]): string {
     const shown = names.slice(0, MAX_WRAPPER_KEYS_NAMED).map((name) => `"${name}": ...`)
     if (names.length > MAX_WRAPPER_KEYS_NAMED) {
@@ -611,11 +598,8 @@ const MAX_UNION_ISSUES_NAMED = 3
 const MAX_UNION_VALUES_NAMED = 10
 const MAX_UNION_DEPTH = 3
 
-/**
- * Whether a branch rejected the caller's own discriminator: a single-value field
- * such as `kind: "EventsNode"`. That branch describes a different variant than
- * the one the caller named, so its complaints are about the wrong shape.
- */
+/** Whether a branch rejected the caller's own discriminator, meaning it
+ *  describes a different variant than the one the caller named. */
 function rejectsTheDiscriminator(branch: readonly z.core.$ZodIssue[]): boolean {
     return branch.some(
         (issue) => issue.code === 'invalid_value' && issue.path.length === 1 && issue.values.length === 1
@@ -623,14 +607,12 @@ function rejectsTheDiscriminator(branch: readonly z.core.$ZodIssue[]): boolean {
 }
 
 /**
- * The union branch that best matches the input: the variant the caller named,
- * or failing that the one that raised the fewest complaints.
+ * The union branch that best matches the input: the variant the caller named, or
+ * failing that the one that raised the fewest complaints.
  *
  * A series entry keyed `kind: "ActionsNode"` and missing `name` fails every
- * branch with one complaint each, and the shortest list alone would pick
- * `EventsNode` and advise rewriting the `kind` the caller meant. Dropping the
- * branches that reject the discriminator first leaves the variant the caller
- * asked for, whose complaint names the field to add.
+ * branch with one complaint each, so the shortest list alone would pick
+ * `EventsNode` and advise rewriting the `kind` the caller meant.
  */
 function bestUnionBranch(branches: readonly (readonly z.core.$ZodIssue[])[]): readonly z.core.$ZodIssue[] | undefined {
     const populated = branches.filter((branch) => branch.length > 0)
@@ -644,11 +626,8 @@ function bestUnionBranch(branches: readonly (readonly z.core.$ZodIssue[])[]): re
     return best
 }
 
-/**
- * Names the accepted values when every branch of a union rejects the same enum
- * value — the shape `math` takes, where the options are split across several
- * enums and each one complains separately.
- */
+/** The accepted values, when every branch of a union rejects the same enum
+ *  value because the options are split across several enums. */
 function unionValueOptions(branches: readonly (readonly z.core.$ZodIssue[])[]): string[] | undefined {
     const values: string[] = []
     for (const branch of branches) {
@@ -667,10 +646,9 @@ function unionValueOptions(branches: readonly (readonly z.core.$ZodIssue[])[]): 
  * Unpacks a union rejection into the field that actually failed.
  *
  * Zod reports a union miss as one `Invalid input` at the union itself, so a
- * malformed series entry arrives as `parameter "series.0": Invalid input` — the
- * caller is told the entry is wrong and never which key to change, and the
- * reports behind this said callers then retried the same entry. Descending into
- * the closest-matching branch names the offending field instead.
+ * malformed series entry arrives as `parameter "series.0": Invalid input`, which
+ * names the entry but never the key to change. Descending into the
+ * closest-matching branch names the offending field instead.
  *
  * Reports field names and schema-declared values only, never caller input.
  */

@@ -8,13 +8,11 @@ import type { Context, Tool, ToolBase, ZodObjectAny } from '@/tools/types'
 
 /**
  * The mirror of `nested-query-input-example.test.ts`: a query wrapper takes the
- * query fields as its own top-level parameters, so an example written as a
- * document — the whole query nested under `query`, or a `properties` group
- * object where the parameter is a flat array — teaches a call the tool rejects.
+ * query fields as its own top-level parameters, so an example written as a query
+ * document teaches a call the tool rejects.
  *
- * These keep every documented example a payload the tool accepts, through both
- * routes a caller reaches it by: the tool schema directly, and the `exec` CLI,
- * which validates the same input behind `call <tool> <json>`.
+ * Every documented example is checked through both routes a caller reaches the
+ * tool by: the schema directly, and the `exec` CLI behind `call <tool> <json>`.
  */
 
 const TOP_LEVEL_QUERY_TOOLS = [
@@ -97,8 +95,6 @@ describe('tools that take their query fields at the top level', () => {
     })
 
     it('documents both a single-series and a multi-series trends example', () => {
-        // The two shapes callers ask for. A description that shows only the
-        // elaborate ones leaves the minimal call to be guessed.
         const series = jsonExamples(definitions['query-trends']?.description ?? '')
             .filter((example): example is { series: unknown[] } => Array.isArray((example as any)?.series))
             .map((example) => example.series.length)

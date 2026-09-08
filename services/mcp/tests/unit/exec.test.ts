@@ -1885,9 +1885,8 @@ describe('exec tool', () => {
             })
         })
 
-        // The mirror mistake: a tool that takes its fields at the top level, called
-        // with the whole payload wrapped in one object. Zod drops the wrapper, so
-        // both this and an empty call arrive as the same missing-parameter message.
+        // Zod drops the wrapper, so a wrapped payload and an empty call arrive as
+        // the same missing-parameter message.
         describe('a top-level payload the caller wrapped', () => {
             const formatFor = (input: unknown): string => {
                 const tool = GENERATED_TOOL_MAP['query-trends']!()
@@ -1918,9 +1917,8 @@ describe('exec tool', () => {
             })
         })
 
-        // A union member is reported as one `Invalid input` at the array entry, so
-        // a malformed series entry never named the key to change and callers
-        // retried it unchanged.
+        // A union member is reported as one `Invalid input` at the array entry,
+        // which never names the key to change.
         describe('a union member the caller got wrong', () => {
             const formatFor = (input: unknown): string => {
                 const tool = GENERATED_TOOL_MAP['query-trends']!()
