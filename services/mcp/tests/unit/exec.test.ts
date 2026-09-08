@@ -1884,5 +1884,84 @@ describe('exec tool', () => {
                 )
             })
         })
+
+        // The mirror mistake: a tool that takes its fields at the top level, called
+        // with the whole payload wrapped in one object. Zod drops the wrapper, so
+        // both this and an empty call arrive as the same missing-parameter message.
+        describe('a top-level payload the caller wrapped', () => {
+            const formatFor = (input: unknown): string => {
+                const tool = GENERATED_TOOL_MAP['query-trends']!()
+                const result = tool.schema.safeParse(input, { reportInput: true })
+                expect(result.success).toBe(false)
+                return formatInputValidationError('query-trends', result.error!, input, tool.schema)
+            }
+
+            it('names the wrapper and echoes the fields back at the top level', () => {
+                const message = formatFor({
+                    query: { series: [{ kind: 'EventsNode', event: '$pageview' }], dateRange: { date_from: '-7d' } },
+                })
+
+                expect(message).toContain('not nested under "query"')
+                expect(message).toContain('resend them as {"series": ..., "dateRange": ...}')
+            })
+
+            it('identifies the wrapping under any key, and when the fields have their own errors', () => {
+                const message = formatFor({ source: { series: [{ kind: 'EventsNode', event: 3 }] } })
+
+                expect(message).toContain('not nested under "source"')
+            })
+
+            it('leaves an unrelated stray key as a dropped key, not a wrapper', () => {
+                const message = formatFor({ events: ['$pageview'] })
+
+                expect(message).toContain('this tool ignored these keys it does not accept: "events"')
+            })
+        })
+
+        // A union member is reported as one `Invalid input` at the array entry, so
+        // a malformed series entry never named the key to change and callers
+        // retried it unchanged.
+        describe('a union member the caller got wrong', () => {
+            const formatFor = (input: unknown): string => {
+                const tool = GENERATED_TOOL_MAP['query-trends']!()
+                const result = tool.schema.safeParse(input, { reportInput: true })
+                expect(result.success).toBe(false)
+                return formatInputValidationError('query-trends', result.error!, input, tool.schema)
+            }
+
+            it('names the field inside the entry rather than the entry alone', () => {
+                const message = formatFor({
+                    series: [
+                        { kind: 'EventsNode', event: '$pageview' },
+                        { kind: 'ActionsNode', id: 3 },
+                    ],
+                })
+
+                expect(message).toContain('parameter "series.1.name"')
+            })
+
+            it('lists the accepted values for a rejected enum, capped', () => {
+                const message = formatFor({
+                    series: [{ kind: 'EventsNode', event: '$pageview', math: 'unique_users' }],
+                })
+
+                expect(message).toContain('parameter "series.0.math" must be one of: total, dau')
+                expect(message).toMatch(/\.\.\. \(\d+ accepted values\)/)
+            })
+
+            it('descends through a nested union to the field that failed', () => {
+                const message = formatFor({
+                    series: [
+                        {
+                            kind: 'EventsNode',
+                            event: '$pageview',
+                            properties: [{ key: 'plan', operator: 'exact', type: 'event' }],
+                        },
+                    ],
+                })
+
+                expect(message).toContain('parameter "series.0.properties.0.value"')
+            })
+        })
     })
 })

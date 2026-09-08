@@ -404,6 +404,59 @@ function looksLikeUnwrappedPayload(
 }
 
 /**
+ * Detects the mirror mistake: the caller wrapped a whole valid payload in one
+ * object — `{query: {series, dateRange}}` — for a tool that takes those fields at
+ * the top level. Zod strips the undeclared wrapper, so the rejection reads as a
+ * bare `missing required parameter` for a field the caller did send, one level
+ * down, and the caller has nothing to correct.
+ *
+ * Decided by re-parsing, like `looksLikeUnwrappedPayload`: unwrap the candidate
+ * and see whether the schema recognizes its contents. Confident when the
+ * unwrapped value parses, or fails only on fields the wrapper actually holds —
+ * both mean the wrapping was the mistake. Returns the wrapper key, so the
+ * message can name it.
+ */
+function overWrappedPayloadKey(input: unknown, schema: ZodObjectAny | undefined): string | undefined {
+    if (!schema || !isRecord(input)) {
+        return undefined
+    }
+    const declared = topLevelFieldNames(schema)
+    for (const [key, value] of Object.entries(input)) {
+        if (declared.has(key) || !isRecord(value) || Object.keys(value).length === 0) {
+            continue
+        }
+        const unwrapped = schema.safeParse(value)
+        if (unwrapped.success) {
+            return key
+        }
+        const readsTheContents = unwrapped.error.issues.every(
+            (issue) => issue.path.length > 0 && String(issue.path[0]) in value
+        )
+        if (readsTheContents) {
+            return key
+        }
+    }
+    return undefined
+}
+
+/**
+ * Renders the top-level shape the tool accepts, from the keys the caller nested
+ * inside its wrapper: `{"series": ..., "dateRange": ...}`.
+ *
+ * Only keys the schema itself declares are named, so the shape is the tool's own
+ * vocabulary, and values are always elided — the message is returned to the
+ * caller and recorded as the analytics error message.
+ */
+function acceptedTopLevelShape(nested: unknown, schema: ZodObjectAny | undefined): string {
+    if (!schema || !isRecord(nested)) {
+        return '{...}'
+    }
+    const declared = topLevelFieldNames(schema)
+    const named = Object.keys(nested).filter((name) => declared.has(name))
+    return named.length > 0 ? renderFieldShape(named) : '{...}'
+}
+
+/**
  * The field names a wrapper parameter declares directly, including the fields of
  * each variant when the wrapper is a union (`read-data-schema` keys its shape off
  * a `kind` discriminator). Composition keywords are walked one level; nothing
@@ -427,6 +480,23 @@ function wrapperFieldNames(schema: ZodObjectAny, key: string): ReadonlySet<strin
         }
     }
     return names
+}
+
+/** The property names a tool's schema declares at the top level. */
+function topLevelFieldNames(schema: ZodObjectAny): ReadonlySet<string> {
+    const root = inputJsonSchema(schema)
+    const properties = isRecord(root) ? root['properties'] : undefined
+    return isRecord(properties) ? new Set(Object.keys(properties)) : new Set<string>()
+}
+
+/** An object shape written from field names alone, capped, with every value
+ *  elided — the message carries the tool's vocabulary, never caller input. */
+function renderFieldShape(names: readonly string[]): string {
+    const shown = names.slice(0, MAX_WRAPPER_KEYS_NAMED).map((name) => `"${name}": ...`)
+    if (names.length > MAX_WRAPPER_KEYS_NAMED) {
+        shown.push('...')
+    }
+    return `{${shown.join(', ')}}`
 }
 
 function variantsOf(node: Record<string, unknown>): Record<string, unknown>[] {
@@ -458,11 +528,7 @@ function acceptedWrapperShape(key: string, input: unknown, schema: ZodObjectAny 
     if (named.length === 0) {
         return `{"${key}": {...}}`
     }
-    const shown = named.slice(0, MAX_WRAPPER_KEYS_NAMED).map((name) => `"${name}": ...`)
-    if (named.length > MAX_WRAPPER_KEYS_NAMED) {
-        shown.push('...')
-    }
-    return `{"${key}": {${shown.join(', ')}}}`
+    return `{"${key}": ${renderFieldShape(named)}}`
 }
 
 /**
@@ -539,6 +605,111 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** Bounds on how much of a union failure the message unpacks, so one bad array
+ *  entry cannot inflate the message or the analytics error string. */
+const MAX_UNION_ISSUES_NAMED = 3
+const MAX_UNION_VALUES_NAMED = 10
+const MAX_UNION_DEPTH = 3
+
+/**
+ * Whether a branch rejected the caller's own discriminator: a single-value field
+ * such as `kind: "EventsNode"`. That branch describes a different variant than
+ * the one the caller named, so its complaints are about the wrong shape.
+ */
+function rejectsTheDiscriminator(branch: readonly z.core.$ZodIssue[]): boolean {
+    return branch.some(
+        (issue) => issue.code === 'invalid_value' && issue.path.length === 1 && issue.values.length === 1
+    )
+}
+
+/**
+ * The union branch that best matches the input: the variant the caller named,
+ * or failing that the one that raised the fewest complaints.
+ *
+ * A series entry keyed `kind: "ActionsNode"` and missing `name` fails every
+ * branch with one complaint each, and the shortest list alone would pick
+ * `EventsNode` and advise rewriting the `kind` the caller meant. Dropping the
+ * branches that reject the discriminator first leaves the variant the caller
+ * asked for, whose complaint names the field to add.
+ */
+function bestUnionBranch(branches: readonly (readonly z.core.$ZodIssue[])[]): readonly z.core.$ZodIssue[] | undefined {
+    const populated = branches.filter((branch) => branch.length > 0)
+    const named = populated.filter((branch) => !rejectsTheDiscriminator(branch))
+    let best: readonly z.core.$ZodIssue[] | undefined
+    for (const branch of named.length > 0 ? named : populated) {
+        if (best === undefined || branch.length < best.length) {
+            best = branch
+        }
+    }
+    return best
+}
+
+/**
+ * Names the accepted values when every branch of a union rejects the same enum
+ * value — the shape `math` takes, where the options are split across several
+ * enums and each one complains separately.
+ */
+function unionValueOptions(branches: readonly (readonly z.core.$ZodIssue[])[]): string[] | undefined {
+    const values: string[] = []
+    for (const branch of branches) {
+        const issue = branch.length === 1 ? branch[0] : undefined
+        if (!issue || issue.code !== 'invalid_value' || issue.path.length > 0) {
+            return undefined
+        }
+        for (const value of issue.values) {
+            values.push(String(value))
+        }
+    }
+    return values.length > 0 ? [...new Set(values)] : undefined
+}
+
+/**
+ * Unpacks a union rejection into the field that actually failed.
+ *
+ * Zod reports a union miss as one `Invalid input` at the union itself, so a
+ * malformed series entry arrives as `parameter "series.0": Invalid input` — the
+ * caller is told the entry is wrong and never which key to change, and the
+ * reports behind this said callers then retried the same entry. Descending into
+ * the closest-matching branch names the offending field instead.
+ *
+ * Reports field names and schema-declared values only, never caller input.
+ */
+function describeUnionIssue(
+    branches: readonly (readonly z.core.$ZodIssue[])[],
+    path: ReadonlyArray<PropertyKey>,
+    depth = 0
+): string | undefined {
+    if (depth >= MAX_UNION_DEPTH) {
+        return undefined
+    }
+    const name = path.map(String).join('.')
+    const options = unionValueOptions(branches)
+    if (options) {
+        const shown = options.slice(0, MAX_UNION_VALUES_NAMED).join(', ')
+        const rest = options.length > MAX_UNION_VALUES_NAMED ? `, ... (${options.length} accepted values)` : ''
+        return `parameter "${name}" must be one of: ${shown}${rest}`
+    }
+    const branch = bestUnionBranch(branches)
+    if (!branch) {
+        return undefined
+    }
+    const parts = branch.slice(0, MAX_UNION_ISSUES_NAMED).map((issue) => {
+        const nestedPath = [...path, ...issue.path]
+        if (issue.code === 'invalid_union') {
+            const nested = describeUnionIssue(issue.errors, nestedPath, depth + 1)
+            if (nested) {
+                return nested
+            }
+        }
+        const nestedName = nestedPath.map(String).join('.')
+        return nestedName ? `parameter "${nestedName}": ${issue.message}` : issue.message
+    })
+    if (branch.length > MAX_UNION_ISSUES_NAMED) {
+        parts.push('...')
+    }
+    return [...new Set(parts)].join('; ')
+}
+
 /** Turns a Zod validation failure into a short, field-named message the model
  *  can act on. Without it, a missing/`undefined` path segment slips through to
  *  the HTTP layer and the API returns a generic 404 that reads as "entity does
@@ -568,6 +739,11 @@ export function formatInputValidationError(
                     const shape = acceptedWrapperShape(path, input, schema)
                     return `missing required parameter: ${path}${hint}; the fields you sent belong inside it, so resend them as ${shape}`
                 }
+                const overWrapped = overWrappedPayloadKey(input, schema)
+                if (overWrapped !== undefined) {
+                    const shape = acceptedTopLevelShape((input as Record<string, unknown>)[overWrapped], schema)
+                    return `missing required parameter: ${path}${hint}; this tool takes these fields at the top level, not nested under "${overWrapped}", so resend them as ${shape}`
+                }
                 const dropped = keysWereRejected ? [] : undeclaredKeys(input, schema)
                 if (dropped.length) {
                     const named = dropped
@@ -579,6 +755,12 @@ export function formatInputValidationError(
                 return `missing required parameter: ${path}${hint}`
             }
             return `parameter "${path}" must be of type ${issue.expected}`
+        }
+        if (issue.code === 'invalid_union') {
+            const expanded = describeUnionIssue(issue.errors, issue.path)
+            if (expanded) {
+                return expanded
+            }
         }
         if (issue.code === 'unrecognized_keys') {
             return `unexpected ${issue.keys.length > 1 ? 'properties' : 'property'}: ${issue.keys.join(', ')}`
