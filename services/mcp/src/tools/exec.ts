@@ -403,6 +403,12 @@ function looksLikeUnwrappedPayload(
     return wrapped.error.issues.every((issue) => issue.path.length > 1 && String(issue.path[0]) === key)
 }
 
+/** Bound on how many stray object keys the check tries, because each try costs a
+ *  full parse of the tool's schema. A wrapped payload sits under a single key, so
+ *  a call carrying more stray objects than this made a different mistake and falls
+ *  through to the dropped-keys message. */
+const MAX_WRAPPER_CANDIDATES = 3
+
 /**
  * The mirror of `looksLikeUnwrappedPayload`: the caller nested a whole valid
  * payload under one key, for a tool that takes those fields at the top level.
@@ -417,10 +423,15 @@ function overWrappedPayloadKey(input: unknown, schema: ZodObjectAny | undefined)
         return undefined
     }
     const declared = topLevelFieldNames(schema)
+    let tried = 0
     for (const [key, value] of Object.entries(input)) {
         if (declared.has(key) || !isRecord(value) || Object.keys(value).length === 0) {
             continue
         }
+        if (tried === MAX_WRAPPER_CANDIDATES) {
+            return undefined
+        }
+        tried += 1
         const unwrapped = schema.safeParse(value)
         if (unwrapped.success) {
             return key
@@ -786,6 +797,14 @@ export function formatInputValidationError(
     // A strict schema rejects unknown keys instead of dropping them, and the
     // `unrecognized_keys` branch below already names them.
     const keysWereRejected = error.issues.some((issue) => issue.code === 'unrecognized_keys')
+    // Resolved once, and on first need: the answer reads only `input` and
+    // `schema`, so it is the same for every issue, while it costs a schema parse
+    // per stray object key. Most rejections never reach the branch that asks.
+    let wrapper: { key: string | undefined } | undefined
+    const overWrappedKey = (): string | undefined => {
+        wrapper ??= { key: overWrappedPayloadKey(input, schema) }
+        return wrapper.key
+    }
     const parts = error.issues.map((issue) => {
         const path = issue.path.map(String).join('.')
         if (issue.code === 'invalid_type') {
@@ -795,7 +814,7 @@ export function formatInputValidationError(
                     const shape = acceptedWrapperShape(path, input, schema)
                     return `missing required parameter: ${path}${hint}; the fields you sent belong inside it, so resend them as ${shape}`
                 }
-                const overWrapped = overWrappedPayloadKey(input, schema)
+                const overWrapped = overWrappedKey()
                 if (overWrapped !== undefined) {
                     const shape = acceptedTopLevelShape((input as Record<string, unknown>)[overWrapped], schema)
                     return `missing required parameter: ${path}${hint}; this tool takes these fields at the top level, not nested under "${overWrapped}", so resend them as ${shape}`
