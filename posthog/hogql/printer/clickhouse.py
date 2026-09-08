@@ -42,6 +42,7 @@ from posthog.hogql.restricted_properties import RESTRICTABLE_JSON_BLOB_COLUMNS, 
 from posthog.hogql.type_system import parse_sql_runtime_type
 from posthog.hogql.visitor import GetFieldsTraverser, clone_expr
 
+from posthog.clickhouse.events_json import EVENTS_PROPERTIES_JSON_SUBCOLUMNS, PERSON_PROPERTIES_JSON_SUBCOLUMNS
 from posthog.exchange_rate_constants import EXCHANGE_RATE_DECIMAL_PRECISION, EXCHANGE_RATE_DICTIONARY_NAME
 from posthog.uuidt import UUIDT
 from posthog.week_start_day import WeekStartDay
@@ -521,7 +522,23 @@ class ClickHousePrinter(BasePrinter):
         if not isinstance(type.table_type.resolve_database_table(self.context), EVENTS_TABLE_TYPES):
             return None
 
-        return f"{JSON_STRIP_EMPTY_STRINGS_AND_NULLS_CLICKHOUSE_NAME}(toJSONString({field_sql}))"
+        serialized = f"toJSONString({field_sql})"
+        subcolumns = (
+            EVENTS_PROPERTIES_JSON_SUBCOLUMNS
+            if resolved_field.name == "properties"
+            else PERSON_PROPERTIES_JSON_SUBCOLUMNS
+        )
+        array_keys = [
+            key for key, column_type in subcolumns.items() if parse_sql_runtime_type(column_type).family == "array"
+        ]
+        if array_keys:
+            keys_sql = "[" + ", ".join(escape_clickhouse_string(key) for key in array_keys) + "]"
+            serialized = (
+                "concat('{', arrayStringConcat(arrayMap(kv -> concat(toJSONString(kv.1), ':', kv.2), "
+                f"arrayFilter(kv -> kv.2 != '[]' OR NOT has({keys_sql}, kv.1), "
+                f"JSONExtractKeysAndValuesRaw({serialized}))), ','), '}}')"
+            )
+        return f"{JSON_STRIP_EMPTY_STRINGS_AND_NULLS_CLICKHOUSE_NAME}({serialized})"
 
     def _serialize_to_json_string_call(self, node: ast.Call) -> str | None:
         if node.name != "toJSONString" or len(node.args) != 1:
