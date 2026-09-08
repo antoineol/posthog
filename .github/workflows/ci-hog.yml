@@ -67,6 +67,7 @@ jobs:
                         - requirements.txt
                         - requirements-dev.txt
                         - .github/workflows/ci-hog.yml
+                        - .github/actions/setup-uv/**
 
     hog-tests:
         needs: changes
