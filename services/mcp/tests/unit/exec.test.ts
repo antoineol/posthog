@@ -1915,6 +1915,19 @@ describe('exec tool', () => {
 
                 expect(message).toContain('this tool ignored these keys it does not accept: "events"')
             })
+
+            // Wrapping leaves a whole parameter unfilled, never a field inside one
+            // the caller reached, so a stray payload must not claim a nested miss.
+            it('leaves a field missing inside a parameter to the caller', () => {
+                const message = formatFor({
+                    series: [{ kind: 'EventsNode', event: '$pageview' }],
+                    breakdownFilter: {},
+                    query: { series: [{ kind: 'EventsNode', event: '$pageview' }] },
+                })
+
+                expect(message).toContain('missing required parameter: breakdownFilter.breakdowns')
+                expect(message).not.toContain('not nested under')
+            })
         })
 
         // A union member is reported as one `Invalid input` at the array entry,

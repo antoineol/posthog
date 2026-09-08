@@ -800,8 +800,14 @@ export function formatInputValidationError(
     // Resolved once, and on first need: the answer reads only `input` and
     // `schema`, so it is the same for every issue, while it costs a schema parse
     // per stray object key. Most rejections never reach the branch that asks.
+    //
+    // Top-level misses only, like its sibling: wrapping the payload can leave a
+    // whole parameter unfilled, but never a field inside one the caller reached.
     let wrapper: { key: string | undefined } | undefined
-    const overWrappedKey = (): string | undefined => {
+    const overWrappedKey = (issuePath: ReadonlyArray<PropertyKey>): string | undefined => {
+        if (issuePath.length !== 1) {
+            return undefined
+        }
         wrapper ??= { key: overWrappedPayloadKey(input, schema) }
         return wrapper.key
     }
@@ -814,7 +820,7 @@ export function formatInputValidationError(
                     const shape = acceptedWrapperShape(path, input, schema)
                     return `missing required parameter: ${path}${hint}; the fields you sent belong inside it, so resend them as ${shape}`
                 }
-                const overWrapped = overWrappedKey()
+                const overWrapped = overWrappedKey(issue.path)
                 if (overWrapped !== undefined) {
                     const shape = acceptedTopLevelShape((input as Record<string, unknown>)[overWrapped], schema)
                     return `missing required parameter: ${path}${hint}; this tool takes these fields at the top level, not nested under "${overWrapped}", so resend them as ${shape}`
