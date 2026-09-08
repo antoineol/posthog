@@ -9,13 +9,11 @@
 #
 # Intentional deltas vs canonical (everything else is kept apples-to-apples):
 # - runs-on: depot-* labels instead of ubuntu-latest
-# - action paths: ./.depot/actions/... instead of ./.github/actions/... (pnpm-install,
-#   setup-sqlx-cli, setup-python-cached, setup-uv, and paths-filter mirror the canonical
-#   composites; any deltas are documented in each mirror's header). Every local action a
-#   depot workflow uses needs a mirror even when byte-identical: Depot resolves
-#   ./.github/actions/<x> from .depot/actions/<x>, so a missing mirror fails the step at
-#   setup with "action manifest not found". setup-turbo is referenced below with no
-#   mirror and is red for exactly that reason; it needs one.
+# - action paths: ./.depot/actions/... instead of ./.github/actions/... Each mirror in
+#   .depot/actions/ documents its own deltas from the canonical composite in its header.
+#   Every local action a depot workflow uses needs a mirror even when it is identical to
+#   canonical: Depot resolves ./.github/actions/<x> from .depot/actions/<x>, so a missing
+#   mirror fails the step at setup with "action manifest not found".
 # - permissions: pull-requests:read (no comment/auto-commit side effects)
 # - Stripped side effects: artifact uploads, CI report section posters (canonical
 #   additionally skips these on trunk-merge/** branches to save GITHUB_TOKEN budget;
@@ -881,7 +879,7 @@ jobs:
                         token: ${{ secrets.POSTHOG_BOT_PAT }}
             # Needs pnpm from the block above, so it cannot run inside it.
             - name: Install turbo
-              uses: ./.github/actions/setup-turbo
+              uses: ./.depot/actions/setup-turbo
 
             - name: Install uv
               id: setup-uv
