@@ -14,11 +14,25 @@ from posthog.oauth_provenance import get_oauth_access_token
 from posthog.permissions import APIScopePermission
 from posthog.temporal.oauth import PULSE_RESEARCH_INTERNAL_SCOPE
 
+from products.subscriptions.backend.facade.proactive import get_proactive_configuration_options
 from products.subscriptions.backend.facade.research import PublicResearchResult, run_public_research
 from products.subscriptions.backend.presentation.serializers import (
+    ProactiveConfigurationOptionsSerializer,
     PulseResearchRequestSerializer,
     PulseResearchResponseSerializer,
 )
+
+
+@extend_schema(tags=["subscriptions"])
+class ProactiveConfigurationOptionsViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
+    scope_object = "subscription"
+    serializer_class = ProactiveConfigurationOptionsSerializer
+    pagination_class = None
+
+    @extend_schema(responses={200: ProactiveConfigurationOptionsSerializer})
+    def list(self, request: Request, parent_lookup_team_id: int) -> Response:
+        options = get_proactive_configuration_options(team_id=parent_lookup_team_id, actor_id=request.user.id)
+        return Response(ProactiveConfigurationOptionsSerializer(options).data, status=status.HTTP_200_OK)
 
 
 @extend_schema(tags=["subscriptions"])

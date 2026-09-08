@@ -58726,6 +58726,20 @@ export namespace Schemas {
       enabled?: boolean;
       /** Whether proactive recommendations may use bounded public web research. Defaults to true. */
       allow_public_web_research?: boolean;
+      /** Whether eligible recommendations can prepare a draft pull request. Defaults to false. */
+      create_draft_pr?: boolean;
+      /**
+         * Repository name in owner/repository format. Requires draft pull request preparation.
+         * @maxLength 201
+         * @nullable
+         */
+      repository?: string | null;
+      /**
+         * GitHub integration ID for the repository. Requires draft pull request preparation.
+         * @minimum 1
+         * @nullable
+         */
+      repository_integration_id?: number | null;
     }
 
     export interface SubscriptionDashboardContext {
@@ -70174,6 +70188,27 @@ export namespace Schemas {
     export interface PrimaryPropertiesResponse {
       /** Mapping from event name to the team-configured primary property for that event. Names without a configured primary property are omitted; callers should fall back to the core taxonomy defaults for those. */
       primary_properties: PrimaryPropertiesResponsePrimaryProperties;
+    }
+
+    export interface ProactiveRepositoryOption {
+      /** Repository currently authorized for the requesting user, in owner/repository format. */
+      readonly repository: string;
+      /**
+         * GitHub integration that currently authorizes this repository.
+         * @minimum 1
+         */
+      readonly repository_integration_id: number;
+    }
+
+    export interface ProactiveConfigurationOptions {
+      /** Whether this PostHog instance is configured to generate proactive recommendations. */
+      readonly proactive_available: boolean;
+      /** Whether this PostHog instance is configured to use public web research for proactive recommendations. */
+      readonly public_web_research_available: boolean;
+      /** Whether this PostHog instance is configured to prepare draft pull requests for proactive recommendations. */
+      readonly draft_pr_available: boolean;
+      /** Repositories currently authorized for the requesting user to use for draft pull request preparation. */
+      readonly repositories: readonly ProactiveRepositoryOption[];
     }
 
     export type ProblemTypeEnum = typeof ProblemTypeEnum[keyof typeof ProblemTypeEnum];
