@@ -1981,6 +1981,28 @@ describe('exec tool', () => {
 
                 expect(message).toContain('parameter "series.0.properties.0.value"')
             })
+
+            // The deepest path the generated schemas hold: the series union, the
+            // group's `nodes` union, the filter union, and the generic filter's own.
+            it('descends into a filter on a series the caller grouped', () => {
+                const message = formatFor({
+                    series: [
+                        {
+                            kind: 'GroupNode',
+                            nodes: [
+                                {
+                                    kind: 'EventsNode',
+                                    event: '$pageview',
+                                    properties: [{ key: 'plan', operator: 'exact', type: 'event' }],
+                                },
+                                { kind: 'EventsNode', event: '$pageleave' },
+                            ],
+                        },
+                    ],
+                })
+
+                expect(message).toContain('parameter "series.0.nodes.0.properties.0.value"')
+            })
         })
     })
 })

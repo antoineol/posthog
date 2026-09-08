@@ -593,10 +593,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Bounds on how much of a union failure the message unpacks, so one bad array
- *  entry cannot inflate the message or the analytics error string. */
+ *  entry cannot inflate the message or the analytics error string.
+ *
+ *  Four levels is what the deepest generated query schema needs: a property
+ *  filter inside a grouped series sits under the series union, the group's
+ *  `nodes` union, the filter union, and the generic filter's own union. A
+ *  shallower cap leaves that filter with the bare `Invalid input` this unpacking
+ *  exists to remove.
+ */
 const MAX_UNION_ISSUES_NAMED = 3
 const MAX_UNION_VALUES_NAMED = 10
-const MAX_UNION_DEPTH = 3
+const MAX_UNION_DEPTH = 4
 
 /** The keys a branch rejects because the schema fixes their value, looking
  *  through a branch that is itself a union: a key one inner variant accepts stays
