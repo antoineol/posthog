@@ -4,11 +4,11 @@ from posthog.migration_helpers import CreateIndexConcurrently
 
 
 class Migration(migrations.Migration):
-    # Required by CreateIndexConcurrently, and why the column it indexes is added in 0118 instead.
+    # Required by CreateIndexConcurrently, and why the column it indexes is added in 0120 instead.
     atomic = False
 
     dependencies = [
-        ("signals", "0118_signalreport_scout_idempotency_key"),
+        ("signals", "0120_signalreport_scout_idempotency_key"),
     ]
 
     operations = [
