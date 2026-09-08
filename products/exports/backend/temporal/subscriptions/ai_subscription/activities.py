@@ -58,6 +58,7 @@ from products.exports.backend.temporal.subscriptions.types import (
 )
 from products.subscriptions.backend.facade.proactive import (
     RecommendationAppendixDTO,
+    RecommendationMemoryDTO,
     completed_recommendation_run_id,
     generate_recommendation_appendix,
     get_proactive_config,
@@ -348,11 +349,16 @@ def _recommendation_contexts(subscription: Subscription) -> tuple[Recommendation
         result.append(
             RecommendationContext(
                 id=f"memory:{item.semantic_key}",
-                content=f"Previously recommended at {item.created_at}: {item.title}. Do not repeat this exact idea.",
+                content=_recommendation_memory_context_content(item),
                 citable=False,
             )
         )
     return tuple(result)
+
+
+def _recommendation_memory_context_content(item: RecommendationMemoryDTO) -> str:
+    content = f"Previously recommended at {item.created_at}: {item.title}. Do not repeat this exact idea."
+    return f"{content} {item.outcome_summary}" if item.outcome_summary else content
 
 
 @temporalio.activity.defn
