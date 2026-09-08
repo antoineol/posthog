@@ -6,6 +6,7 @@ Frozen, framework-free values other products need. No Django imports.
 
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeGuard
+from uuid import UUID
 
 CHECK_SUITE_WORKFLOW_NAME = "data-quality-run-suite"
 DISPATCH_SCHEDULED_SUITES_WORKFLOW_NAME = "data-quality-dispatch-scheduled-suites"
@@ -36,3 +37,16 @@ class CheckTypeInfo:
     description: str
     requires_column: bool
     config_schema: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MetricSubject:
+    id: UUID
+    name: str
+    display_name: str
+
+
+@dataclass(frozen=True)
+class OutputColumn:
+    name: str
+    type: str | None

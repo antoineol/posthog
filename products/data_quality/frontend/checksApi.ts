@@ -42,6 +42,8 @@ import type {
     DataQualityCheckApi,
     DataQualityCheckRunApi,
     DataQualityCheckTypeApi,
+    DataQualityMetricSubjectApi,
+    DataQualityOutputSchemaApi,
     DataQualitySubjectHealthApi,
     DataQualitySuiteRunApi,
     PaginatedDataQualityCheckListApi,
@@ -75,6 +77,16 @@ function isMetric({ subjectType }: DataQualitySubjectRef): boolean {
 }
 
 export const checksApi = {
+    metricSubjects: (): Promise<DataQualityMetricSubjectApi[]> =>
+        metricApi.dataQualityChecksMetricSubjectsList(projectId()),
+
+    outputSchema: (ref: DataQualitySubjectRef): Promise<DataQualityOutputSchemaApi> => {
+        if (ref.subjectType !== 'metric') {
+            return Promise.resolve({ columns: [] })
+        }
+        return metricApi.dataCatalogMetricsChecksOutputSchemaRetrieve(projectId(), ref.subjectId)
+    },
+
     list: (ref: DataQualitySubjectRef, limit: number): Promise<PaginatedDataQualityCheckListApi> =>
         isMetric(ref)
             ? dataCatalogMetricsChecksList(projectId(), ref.subjectId, { limit })
