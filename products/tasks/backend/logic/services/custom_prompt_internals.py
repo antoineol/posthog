@@ -96,7 +96,6 @@ class CustomPromptSandboxContext:
 
     team_id: int
     user_id: int
-    triggering_signal_id: str | None = None
     repository: str | None = None
     sandbox_environment_id: str | None = None
     posthog_mcp_scopes: PosthogMcpScopes | None = None
@@ -236,7 +235,6 @@ async def create_task_and_trigger(
         mode="background",
         branch=branch,
         signal_report_id=signal_report_id,
-        triggering_signal_id=context.triggering_signal_id,
         ai_stage=ai_stage,
         posthog_mcp_scopes=posthog_mcp_scopes,
         sandbox_environment_id=context.sandbox_environment_id,
