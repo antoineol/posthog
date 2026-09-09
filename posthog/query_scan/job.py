@@ -15,7 +15,7 @@ from typing import Any
 
 import structlog
 
-from posthog.schema import HogQLQueryModifiers, QueryScanRange, QueryScanStatus
+from posthog.schema import HogQLFilters, HogQLQueryModifiers, QueryScanRange, QueryScanStatus
 
 from posthog.hogql.constants import LimitContext
 from posthog.hogql.context import HogQLContext
@@ -154,7 +154,7 @@ def _analyze_hogql(runner: HogQLQueryRunner, job: QueryScanJob, thresholds: Scan
         return None
 
     plan = _explain(sql, context, job.team)
-    has_filters_placeholder = _has_open_filters_placeholder(runner)
+    has_filters_placeholder = _has_open_filters_placeholder(runner.query.query, runner.query.filters)
     start_date = check_start_date(prepared_tree, has_filters_placeholder=has_filters_placeholder)
     counted = _count_events_in_range(job.team, start_date.date_from, start_date.date_to)
     # The person count only decides the persons gate, so a query that never reads persons skips it.
@@ -216,19 +216,25 @@ def _resolved_date_range(runner: QueryRunner) -> _ResolvedDateRange:
     return _ResolvedDateRange(date_from=query_date_range.date_from().date(), date_to=query_date_range.date_to().date())
 
 
-def _has_open_filters_placeholder(runner: HogQLQueryRunner) -> bool:
+def _has_open_filters_placeholder(query: str, filters: HogQLFilters | None) -> bool:
     """Whether the query asks for a date range through ``{filters}`` and nobody supplied one.
 
     The placeholder then expands to no bound at all, so the missing start date is on the insight
-    or the dashboard rather than in the SQL, and the advice has to say so.
+    or the dashboard rather than in the SQL, and the advice has to say so. Only the predicate
+    forms count: ``{filters.interval(...)}`` and ``{filters.breakdown(...)}`` substitute a value,
+    so no date range on the insight can bound the query through them.
     """
     try:
-        if not find_placeholders(parse_select(runner.query.query)).has_filters:
+        if not find_placeholders(parse_select(query)).has_date_filters:
             return False
     except Exception:
         return False
-    date_range = runner.query.filters.dateRange if runner.query.filters else None
-    return not (date_range and (date_range.date_from or date_range.date_to))
+    date_range = filters.dateRange if filters else None
+    if date_range is None:
+        return True
+    # "all" promises the whole table, so the placeholder still expands to no lower bound.
+    date_from = None if date_range.date_from == "all" else date_range.date_from
+    return not (date_from or date_range.date_to)
 
 
 def _explain(sql: str, context: HogQLContext, team: Team) -> QueryPlan | None:

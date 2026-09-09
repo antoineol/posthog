@@ -5,9 +5,15 @@ from typing import Any
 from posthog.test.base import BaseTest
 from unittest import mock
 
+from django.test import SimpleTestCase
+
+from parameterized import parameterized
+
+from posthog.schema import DateRange, HogQLFilters
+
 from posthog.query_scan import slot
 from posthog.query_scan.flag import QueryScanFlag
-from posthog.query_scan.job import QueryScanJob, run_query_scan
+from posthog.query_scan.job import QueryScanJob, _has_open_filters_placeholder, run_query_scan
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -104,3 +110,41 @@ class TestQueryScanJob(BaseTest):
         assert stored is not None
         assert stored.status == "pending"
         self.capture.assert_not_called()
+
+
+class TestOpenFiltersPlaceholder(SimpleTestCase):
+    @parameterized.expand(
+        [
+            ("no placeholder at all", "select count() from events", None, False),
+            ("open filters", "select count() from events where {filters}", None, True),
+            ("open bound filters", "select count() from events where {filters(timestamp AS timestamp)}", None, True),
+            (
+                "filters with a date range supplied",
+                "select count() from events where {filters}",
+                HogQLFilters(dateRange=DateRange(date_from="-7d")),
+                False,
+            ),
+            (
+                "filters set to all time",
+                "select count() from events where {filters}",
+                HogQLFilters(dateRange=DateRange(date_from="all")),
+                True,
+            ),
+            (
+                "only an interval placeholder",
+                "select toStartOfInterval(timestamp, {filters.interval('day')}), count() from events group by 1",
+                None,
+                False,
+            ),
+            (
+                "only a breakdown placeholder",
+                "select {filters.breakdown(properties.plan AS 'plan')}, count() from events group by 1",
+                None,
+                False,
+            ),
+        ]
+    )
+    def test_only_a_date_carrying_placeholder_puts_the_start_date_on_the_insight(
+        self, _name: str, query: str, filters: HogQLFilters | None, expected: bool
+    ) -> None:
+        assert _has_open_filters_placeholder(query, filters) is expected
