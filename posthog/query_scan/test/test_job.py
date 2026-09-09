@@ -42,12 +42,12 @@ class TestQueryScanJob(BaseTest):
         self.capture = capture_patcher.start().return_value.__enter__.return_value
         self.addCleanup(capture_patcher.stop)
 
-    def _job(self) -> QueryScanJob:
+    def _job(self, sql: str = "select count() from events") -> QueryScanJob:
         return QueryScanJob(
             team=self.team,
             user=self.user,
             cache_key="cache_key_1",
-            query={"kind": "HogQLQuery", "query": "select count() from events"},
+            query={"kind": "HogQLQuery", "query": sql},
             modifiers=None,
             insight_id=None,
             dashboard_id=None,
@@ -56,10 +56,12 @@ class TestQueryScanJob(BaseTest):
             trigger="fresh",
         )
 
-    def _run(self, *, explain: Any = None, count_error: Exception | None = None) -> None:
+    def _run(self, *, explain: Any = None, count_error: Exception | None = None, sql: str | None = None) -> list[str]:
         plan = (FIXTURES / "no_event_filter.json").read_text() if explain is None else explain
+        executed: list[str] = []
 
         def execute(query: str, *args: Any, **kwargs: Any) -> Any:
+            executed.append(query)
             if query.startswith("EXPLAIN"):
                 if isinstance(plan, Exception):
                     raise plan
@@ -71,7 +73,8 @@ class TestQueryScanJob(BaseTest):
             return [(200_000,)]
 
         with mock.patch("posthog.query_scan.job.sync_execute", side_effect=execute):
-            run_query_scan(self._job())
+            run_query_scan(self._job(sql=sql) if sql is not None else self._job())
+        return executed
 
     def test_writes_a_done_slot_and_reports_it(self) -> None:
         self._run()
@@ -106,6 +109,35 @@ class TestQueryScanJob(BaseTest):
 
         raised = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.9, persons_ratio=0.5)
         assert slot.get(self.team.pk, "cache_key_2", thresholds=raised.thresholds_fingerprint) is not None
+
+    @parameterized.expand(
+        [
+            # Reads no events and pushes the filter into the persons subquery, so neither
+            # denominator has a consumer: the whole-project counts would be pure waste, and an
+            # event ratio built from them would describe a table this query never touched.
+            (
+                "no events and a filtered persons join",
+                "select count() from persons where properties.email = 'a@b.c'",
+                False,
+                False,
+            ),
+            # An unfiltered join is the one shape the persons gate reads, and it reads events too.
+            (
+                "events joined to every person",
+                "select count() from events as e join persons as p on e.person_id = p.id where e.event = 'purchase'",
+                True,
+                True,
+            ),
+        ]
+    )
+    def test_a_count_runs_only_when_a_check_consumes_it(
+        self, _name: str, sql: str, expect_events_count: bool, expect_person_count: bool
+    ) -> None:
+        executed = self._run(sql=sql)
+
+        counts = [query for query in executed if not query.startswith("EXPLAIN")]
+        assert any("min(timestamp)" in query for query in counts) is expect_events_count
+        assert any("FROM person " in query for query in counts) is expect_person_count
 
     def test_a_failed_explain_still_writes_a_done_slot(self) -> None:
         self._run(explain=Exception("EXPLAIN timed out"))

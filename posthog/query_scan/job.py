@@ -40,6 +40,7 @@ from posthog.query_scan.checks.start_date import check_start_date
 from posthog.query_scan.explain import QueryPlan, parse_query_plan
 from posthog.query_scan.flag import get_query_scan_flag
 from posthog.query_scan.slot import QueryScanSlot, set_done
+from posthog.query_scan.tree import find_events_reads
 
 logger = structlog.get_logger(__name__)
 
@@ -157,9 +158,18 @@ def _analyze_hogql(runner: HogQLQueryRunner, job: QueryScanJob, thresholds: Scan
     plan = _explain(sql, context, job.team)
     has_filters_placeholder = _has_open_filters_placeholder(runner.query.query, runner.query.filters)
     start_date = check_start_date(prepared_tree, has_filters_placeholder=has_filters_placeholder)
-    counted = _count_events_in_range(job.team, start_date.date_from, start_date.date_to)
-    # The person count only decides the persons gate, so a query that never reads persons skips it.
-    person_rows = _count_person_rows(job.team) if check_persons_join(clickhouse_context).reads_persons else None
+    # A query that reads no events has no denominator to measure against: every check that
+    # would use one is already quiet, and the project's whole event count is not what such a
+    # query read, so counting it would only store a ratio that means nothing.
+    reads_events = bool(find_events_reads(prepared_tree))
+    counted = (
+        _count_events_in_range(job.team, start_date.date_from, start_date.date_to)
+        if reads_events
+        else _EventCount(events=None)
+    )
+    # The person count only decides the gate on an unfiltered join, so a query that pushes a
+    # filter into the subquery, or never joins persons at all, skips it.
+    person_rows = _count_person_rows(job.team) if check_persons_join(clickhouse_context).unfiltered else None
 
     result = analyze(
         prepared_tree,
