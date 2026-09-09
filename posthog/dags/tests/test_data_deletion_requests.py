@@ -15,6 +15,7 @@ from clickhouse_driver import Client
 from dagster import build_op_context
 
 from posthog.clickhouse.adhoc_events_deletion import ADHOC_EVENTS_DELETION_TABLE
+from posthog.clickhouse.client import sync_execute
 from posthog.clickhouse.cluster import ClickhouseCluster, LightweightDeleteMutationRunner
 from posthog.dags.data_deletion_requests import (
     DataDeletionRequestConfig,
@@ -54,6 +55,7 @@ from posthog.models.deletion_targets import (
     UnreachableTargetError,
     placement_for,
 )
+from posthog.models.event.sql import EVENTS_PROPERTIES_JSON_TYPE, json_property_presence_expr
 from posthog.models.flag_evaluations.sql import FLAG_EVALUATIONS_DATA_TABLE, FLAG_EVALUATIONS_SOURCE_EVENT
 from posthog.test.persons import create_person
 
@@ -2440,3 +2442,26 @@ def test_property_removal_where_omits_event_filter_when_delete_all_events():
     sql, params = _property_removal_where(_property_removal_ctx(events=[], delete_all_events=True))
     assert "event IN" not in sql
     assert "events" not in params
+
+
+@pytest.mark.parametrize(
+    "document,prop,expected",
+    [
+        ('{"$browser":"Chrome"}', "$groups.organization", 0),
+        ('{"$browser":"Chrome"}', "$groups", 0),
+        ('{"$groups":{"organization":"org1"}}', "$groups.organization", 1),
+        ('{"$groups":{"custom_group":"g"}}', "$groups", 1),
+        ('{"$browser":""}', "$browser", 0),
+        ('{"custom":""}', "custom", 0),
+        ('{"custom":{"a":""}}', "custom", 0),
+        ('{"custom":{"a":"y"}}', "custom", 1),
+    ],
+)
+def test_json_property_presence_expr_treats_empty_values_as_absent(document: str, prop: str, expected: int):
+    predicate = json_property_presence_expr("properties", prop)
+    [(present,)] = sync_execute(
+        f"SELECT toUInt8({predicate}) FROM (SELECT CAST(%(raw)s, %(json_type)s) AS properties)",
+        {"raw": document, "json_type": EVENTS_PROPERTIES_JSON_TYPE()},
+    )
+
+    assert present == expected

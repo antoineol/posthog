@@ -112,6 +112,27 @@ class TestNewEventsSchemaPropertySubcolumns(SimpleTestCase):
         assert isinstance(plan.access.source.physical_type.item_type, ast.StringType)
         assert plan.access.source.has_bloom_filter_index is False
 
+    @parameterized.expand(
+        [
+            ("value", "select properties.$browser from events", "nullIf(events.properties.`$browser`, '')"),
+            (
+                "is_null",
+                "select count() from events where properties.$browser is null",
+                "isNull(nullIf(events.properties.`$browser`, ''))",
+            ),
+            (
+                "is_not_null",
+                "select count() from events where properties.$browser is not null",
+                "isNotNull(nullIf(events.properties.`$browser`, ''))",
+            ),
+        ]
+    )
+    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
+    def test_typed_string_path_reads_empty_as_null(self, _name: str, query: str, expected: str) -> None:
+        printed = self._print_select(query)
+
+        assert expected in printed, printed
+
     @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
     def test_exception_types_use_array_subcolumn(self) -> None:
         printed = self._print_select("select count() from events where properties.$exception_types = 'TypeError'")
@@ -1193,7 +1214,7 @@ class TestEventsSchemaPropertyParity(ClickhouseTestMixin, HypothesisDjangoTestCa
         assert native[0] == legacy[0]
 
         browser = properties.get("$browser")
-        assert native[1] == (browser or "")
+        assert native[1] == (browser or None)
 
         if browser in (None, ""):
             assert native[2] == 0

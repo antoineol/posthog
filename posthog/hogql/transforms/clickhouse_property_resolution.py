@@ -502,6 +502,10 @@ def _json_subcolumn_value_expr(
                 type=ast.StringType(nullable=True),
             )
         return serialized
+    if _is_string_column(source) and not source.is_nullable:
+        # A declared String path stores '' for a missing property. Read '' as NULL, the same as a non-nullable
+        # materialized column, so that IS NULL and is-set filters on the path see the missing value.
+        return ast.Call(name="nullIf", args=[value, _sentinel("")], type=ast.StringType(nullable=True))
     return value
 
 

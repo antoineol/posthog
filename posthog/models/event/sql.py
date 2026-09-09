@@ -1,6 +1,7 @@
 from django.conf import settings
 
 from posthog.hogql.escape_sql import escape_clickhouse_identifier, escape_clickhouse_string
+from posthog.hogql.functions.udfs import JSON_STRIP_EMPTY_STRINGS_AND_NULLS_CLICKHOUSE_NAME
 
 from posthog.clickhouse.base_sql import COPY_ROWS_BETWEEN_TEAMS_BASE_SQL
 from posthog.clickhouse.cluster import ON_CLUSTER_CLAUSE
@@ -61,8 +62,9 @@ def json_property_presence_expr(column: str, prop: str) -> str:
     """SQL predicate testing whether a (possibly dotted) property path is present in a native-JSON
     events column, for deletion/mutation predicates that run against the JSON events tables.
 
-    Mirrors the HogQL resolver's JSONHas lowering: a typed subcolumn is present when non-null; a
-    dynamic path is present when its scalar read is non-null or its sub-object read is non-empty.
+    Mirrors the HogQL resolver's JSONHas lowering, with the materialized-column rule that an empty
+    value is absent: a declared path is present when it is not null and not empty; a dynamic path
+    is present when its scalar read is a non-empty string or its sub-object holds a non-empty value.
     ClickHouse's JSONHas() cannot be used directly on a JSON-typed column — it does not see typed
     paths or nested objects there.
     """
@@ -76,17 +78,23 @@ def json_property_presence_expr(column: str, prop: str) -> str:
     column_sql = escape_clickhouse_identifier(column)
     path_sql = ".".join(escape_clickhouse_identifier(part) for part in parts)
     scalar = f"{column_sql}.{path_sql}"
-    if len(parts) == 1 and prop in subcolumns:
+    # Declared paths can be dotted ($groups.organization), so match the whole path before the head.
+    if prop in subcolumns:
         if not subcolumns[prop].startswith("Nullable("):
             return f"notEmpty({scalar})"
         return f"isNotNull({scalar})"
-    if parts[0] in subcolumns:
+    if len(parts) > 1 and parts[0] in subcolumns:
         head = f"{column_sql}.{escape_clickhouse_identifier(parts[0])}"
         head_document = head if subcolumns[parts[0]] in ("String", "Nullable(String)") else f"toJSONString({head})"
         tail = ", ".join(escape_clickhouse_string(part) for part in parts[1:])
         return f"JSONHas(ifNull({head_document}, ''), {tail})"
+    # The sub-object serializes the '' default of every declared path under it ($groups always
+    # shows organization/project/instance), so strip empty values before the emptiness check.
     sub_object = f"{column_sql}.^{path_sql}"
-    return f"(isNotNull({scalar}) OR toJSONString({sub_object}) != '{{}}')"
+    return (
+        f"(notEmpty(ifNull(toString({scalar}), '')) "
+        f"OR {JSON_STRIP_EMPTY_STRINGS_AND_NULLS_CLICKHOUSE_NAME}(toJSONString({sub_object})) != '{{}}')"
+    )
 
 
 def TRUNCATE_EVENTS_TABLE_SQL():
