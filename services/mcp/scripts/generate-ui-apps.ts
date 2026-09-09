@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+import { build } from 'esbuild'
 /**
  * Generates UI app entry points and resource registry from YAML definitions.
  *
@@ -15,11 +16,14 @@
  */
 import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
+import { tmpdir } from 'node:os'
 import * as path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parse as parseYaml } from 'yaml'
 
+import { honoEsbuildOptions } from './hono-esbuild-config'
 import { discoverDefinitions, isToolsConfig } from './lib/definitions.mjs'
+import { validateListAppToolCall } from './lib/validate-ui-app-tool-call'
 import { MCP_ROOT_DIR, ROOT_DIR } from './utils'
 import {
     type CategoryConfig,
@@ -401,8 +405,31 @@ ${appEntries},
 // Main
 // ------------------------------------------------------------------
 
-function main(): void {
+async function loadToolFactories(): Promise<(typeof import('../src/tools'))['TOOL_MAP']> {
+    const directory = fs.mkdtempSync(path.join(tmpdir(), 'mcp-ui-app-schemas-'))
+    const outfile = path.join(directory, 'tool-factories.mjs')
+    try {
+        await build({
+            ...honoEsbuildOptions({ outfile, sourcemap: false }),
+            tsconfig: path.join(MCP_ROOT_DIR, 'tsconfig.json'),
+            entryPoints: [],
+            stdin: {
+                contents:
+                    "export { TOOL_MAP } from './src/tools'; export { GENERATED_TOOL_MAP } from './src/tools/generated'",
+                resolveDir: MCP_ROOT_DIR,
+            },
+            logLevel: 'silent',
+        })
+        const { TOOL_MAP, GENERATED_TOOL_MAP } = await import(pathToFileURL(outfile).href)
+        return { ...TOOL_MAP, ...GENERATED_TOOL_MAP }
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+    }
+}
+
+async function main(): Promise<void> {
     const definitionSources = discoverDefinitions({ definitionsDir: DEFINITIONS_DIR, productsDir: PRODUCTS_DIR })
+    const toolFactories = await loadToolFactories()
 
     fs.mkdirSync(GENERATED_APPS_DIR, { recursive: true })
 
@@ -473,6 +500,8 @@ function main(): void {
                     process.exit(1)
                 }
                 const resolved = resolveListApp(appKey, appConfig, componentImport!)
+                const toolFactory = toolFactories[resolved.detail_tool]
+                validateListAppToolCall(appKey, resolved, toolFactory?.().schema)
                 const code = generateListApp(appKey, resolved)
                 const outPath = path.join(GENERATED_APPS_DIR, `${appKey}.tsx`)
                 fs.writeFileSync(outPath, code)
@@ -603,5 +632,8 @@ const isDirectRun =
     stripExt(path.resolve(process.argv[1])) === stripExt(fileURLToPath(import.meta.url))
 
 if (isDirectRun) {
-    main()
+    main().catch((error) => {
+        console.error(error)
+        process.exitCode = 1
+    })
 }

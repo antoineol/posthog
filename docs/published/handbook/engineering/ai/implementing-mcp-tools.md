@@ -307,6 +307,13 @@ Product teams own their definitions and control which operations are exposed as 
 
    Unknown keys are rejected at build time (Zod `.strict()`) to catch typos early.
 
+   For generated list apps, `generate:ui-apps` also checks `detail_tool` and the
+   top-level keys in `detail_args` against the registered tool's input schema.
+   Unknown tools, unknown argument names, and missing required arguments fail
+   generation. Use object literals with explicit keys; spreads and computed keys
+   cannot be validated. This check does not execute argument expressions or validate
+   dynamic item values. Regenerate tool handlers before UI apps after schema changes.
+
    #### Custom input schemas
 
    By default, tool input schemas are auto-derived from OpenAPI via Orval.
