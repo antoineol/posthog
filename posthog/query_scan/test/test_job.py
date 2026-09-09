@@ -103,6 +103,14 @@ class TestQueryScanJob(BaseTest):
         assert properties["events_in_range"] == EVENTS_IN_RANGE
         assert properties["explain_ok"] is True
 
+    def test_a_finding_quotes_the_clause_the_person_typed(self) -> None:
+        self._run(sql="select count() from events where properties.plan = 'pro' or event = 'upgrade'")
+
+        stored = slot.get(self.team.pk, "cache_key_1")
+        assert stored is not None
+        clauses = {str(finding.kind): finding.clause for finding in stored.findings}
+        assert clauses["event_filter_not_used"] == "properties.plan = 'pro' or event = 'upgrade'"
+
     def test_a_done_slot_from_other_thresholds_reads_as_absent(self) -> None:
         self._run()
 

@@ -194,6 +194,7 @@ def _analyze_hogql(runner: HogQLQueryRunner, job: QueryScanJob, thresholds: Scan
         person_rows=person_rows,
         has_filters_placeholder=has_filters_placeholder,
         thresholds=thresholds,
+        source=runner.query.query,
     )
     return _Analysis(
         result=result,
