@@ -68,7 +68,7 @@ HogQL is PostHog's variant of SQL. HogQL is based on Clickhouse SQL with a few s
 
 {get_hogql_functions()}
 
-You fix HogQL errors that may come from either HogQL resolver errors or clickhouse execution errors. You don't help with other knowledge.
+{{{{role}}}}
 
 Important HogQL differences versus other SQL dialects:
 - JSON properties are accessed like `properties.foo.bar` instead of `properties->foo->bar`
@@ -109,6 +109,10 @@ Note: "persons" means "users" here - instead of a "users" table, we have a "pers
 
 """.strip()
 
+FIXER_ROLE = "You fix HogQL errors that may come from either HogQL resolver errors or clickhouse execution errors. You don't help with other knowledge."
+
+ADVICE_ROLE = "You apply one instruction to a HogQL query. You don't help with other knowledge."
+
 USER_PROMPT = """
 Fix the errors in the HogQL query below and only return the new updated query in your response.
 
@@ -120,6 +124,18 @@ Fix the errors in the HogQL query below and only return the new updated query in
 {{schema_description}}
 
 Below is the current HogQL query and the error message
+"""
+
+ADVICE_PROMPT = """
+Apply the instruction below to the HogQL query and only return the new updated query in your response.
+
+- Keep the question the query answers the same. The results must still mean what they meant before.
+- Don't change any other part of the query, including its formatting, capitalization and shorthand syntax.
+- Where the instruction needs event names you cannot know, write `('…')` in their place for the user to fill in.
+
+{{schema_description}}
+
+Below is the current HogQL query and the instruction to apply
 """
 
 
@@ -165,8 +181,8 @@ def _get_schema_description(ai_context: dict[Any, Any], hogql_context: HogQLCont
     return schema_description
 
 
-def _get_system_prompt(all_tables: list[str]) -> str:
-    return SYSTEM_PROMPT.replace("{{all_table_names}}", str(all_tables))
+def _get_system_prompt(all_tables: list[str], role: str = FIXER_ROLE) -> str:
+    return SYSTEM_PROMPT.replace("{{all_table_names}}", str(all_tables)).replace("{{role}}", role)
 
 
 def _get_user_prompt(schema_description: str) -> str:
@@ -181,6 +197,18 @@ def _get_user_prompt(schema_description: str) -> str:
     )
 
 
+def _get_advice_user_prompt(schema_description: str) -> str:
+    return (
+        ADVICE_PROMPT.replace("{{schema_description}}", schema_description)
+        + "\n\n<hogql_query>"
+        + "{{{hogql_query}}}"
+        + "</hogql_query>"
+        + "\n\n<instruction>"
+        + "{{{instruction}}}"
+        + "</instruction>"
+    )
+
+
 class HogQLQueryFixerTool(MaxTool):
     name: str = "fix_hogql_query"
     description: str = "Fixes any error in the current HogQL query"
@@ -188,6 +216,10 @@ class HogQLQueryFixerTool(MaxTool):
 
     def _run_impl(self) -> tuple[str, str | None]:
         connection_id = self.context.get("connection_id") or None
+        instruction = str(self.context.get("instruction") or "").strip()
+        # An error wins over an instruction, because a query that does not run must be fixed before
+        # it can be changed.
+        advice_mode = bool(instruction) and not str(self.context.get("error_message") or "").strip()
         # A direct-query connection's tables live outside the ClickHouse catalog. Build the database
         # from that connection so the prompt shows its real tables instead of only `events` etc.
         source = get_direct_connection_source(self._team, connection_id, user=self._user) if connection_id else None
@@ -203,11 +235,13 @@ class HogQLQueryFixerTool(MaxTool):
             [
                 (
                     "system",
-                    _get_system_prompt(all_table_names),
+                    _get_system_prompt(all_table_names, ADVICE_ROLE if advice_mode else FIXER_ROLE),
                 ),
                 (
                     "user",
-                    _get_user_prompt(schema_description),
+                    _get_advice_user_prompt(schema_description)
+                    if advice_mode
+                    else _get_user_prompt(schema_description),
                 ),
             ],
             template_format="mustache",

@@ -28,6 +28,9 @@ from posthog.schema import (
     PathsQuery,
     PathsV2Filter,
     PathsV2Query,
+    QueryScanFindingKind,
+    QueryScanStatus,
+    QueryScanWarning,
     RetentionFilter,
     RetentionQuery,
     StickinessQuery,
@@ -40,6 +43,7 @@ from posthog.hogql.errors import ExposedHogQLError
 
 from posthog.clickhouse.query_tagging import Feature, Product, get_query_tags, tags_context
 from posthog.errors import ExposedCHQueryError
+from posthog.query_scan.slot import QueryScanSlot
 
 from ee.hogai.context.insight.query_executor import (
     AssistantQueryExecutor,
@@ -49,6 +53,14 @@ from ee.hogai.context.insight.query_executor import (
 )
 from ee.hogai.tool_errors import MaxToolRetryableError
 from ee.hogai.utils.query import validate_assistant_query
+
+_SCAN_FINDING = QueryScanWarning(
+    kind=QueryScanFindingKind.NO_EVENT_FILTER,
+    message="This query read every event in its date range: 4.2 billion rows in 12.3 s.",
+    fix="Add an event filter naming the events this question is about. Change nothing else.",
+    rows_read=4_200_000_000,
+    duration_ms=12_300,
+)
 
 
 class TestAssistantQueryExecutor(NonAtomicBaseTest):
@@ -276,6 +288,53 @@ class TestAssistantQueryExecutor(NonAtomicBaseTest):
             await self.query_runner.arun_and_format_query(query)
 
         self.assertIn("ClickHouse error", str(context.exception))
+
+    @patch("ee.hogai.context.insight.query_executor.get_query_scan_slot")
+    @patch("ee.hogai.context.insight.query_executor.process_query_dict")
+    async def test_run_and_format_query_prepends_scan_block_to_a_killed_run(self, mock_process_query, mock_get_slot):
+        error = ExposedCHQueryError("Query exceeded the memory limit")
+        error.query_scan = {
+            "mode": "show",
+            "rows_read": 4_200_000_000,
+            "duration_ms": 12_300,
+            "status": "pending",
+            "killed": True,
+        }
+        error.cache_key = "cache_abc"
+        mock_process_query.side_effect = error
+        mock_get_slot.return_value = QueryScanSlot(status=QueryScanStatus.DONE, findings=(_SCAN_FINDING,))
+
+        with self.assertRaises(MaxToolRetryableError) as context:
+            await self.query_runner.arun_and_format_query(AssistantTrendsQuery(series=[]))
+
+        message = str(context.exception)
+        self.assertTrue(message.startswith("<query_scan_warning>"))
+        self.assertIn("ClickHouse stopped this query after 12.3 s", message)
+        self.assertIn("- This query read every event in its date range", message)
+        self.assertIn("Query exceeded the memory limit", message)
+
+    @patch("ee.hogai.context.insight.query_executor.get_query_scan_slot")
+    @patch("ee.hogai.context.insight.query_executor.process_query_dict")
+    async def test_run_and_format_query_waits_for_the_scan_of_a_slow_run(self, mock_process_query, mock_get_slot):
+        mock_process_query.return_value = {
+            "results": [[1]],
+            "columns": ["count"],
+            "cache_key": "cache_abc",
+            "query_scan": {
+                "mode": "show",
+                "rows_read": 4_200_000_000,
+                "duration_ms": 12_300,
+                "status": "pending",
+            },
+        }
+        mock_get_slot.return_value = QueryScanSlot(status=QueryScanStatus.DONE, findings=(_SCAN_FINDING,))
+
+        result, _ = await self.query_runner.arun_and_format_query(
+            AssistantHogQLQuery(query="SELECT count() FROM events")
+        )
+
+        self.assertIn("This query read 4.2 billion rows in 12.3 s, far more than it needs.", result)
+        self.assertIn("- This query read every event in its date range", result)
 
     @patch("ee.hogai.context.insight.query_executor.process_query_dict")
     async def test_run_and_format_query_handles_generic_exception(self, mock_process_query):

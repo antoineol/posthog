@@ -3,7 +3,7 @@ import time
 import asyncio
 from dataclasses import field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
@@ -30,6 +30,7 @@ from posthog.schema import (
     HogQLQuery,
     LifecycleQuery,
     PathsQuery,
+    QueryScanStatus,
     RetentionQuery,
     StickinessQuery,
     TrendsQuery,
@@ -49,6 +50,10 @@ from posthog.errors import ExposedCHQueryError
 from posthog.event_usage import EventSource
 from posthog.hogql_queries.query_runner import BLOCKING_EXECUTION_MODES, ExecutionMode
 from posthog.models import Team
+from posthog.query_scan.slot import (
+    QueryScanSlot,
+    get as get_query_scan_slot,
+)
 from posthog.sync import database_sync_to_async
 
 from products.access_control.backend.facade.user_access_control import UserAccessControlError
@@ -65,6 +70,7 @@ from ee.hogai.context.insight.format import (
     StickinessResultsFormatter,
     TrendsResultsFormatter,
     format_access_control_warnings,
+    format_query_scan_warnings,
     format_warehouse_sync_warnings,
     get_boxplot_results,
     is_boxplot_query,
@@ -145,6 +151,8 @@ class AssistantQueryExecutor:
     """
 
     WAIT_TIME_S = 0.5
+    SCAN_POLL_INTERVAL_S = 0.5
+    SCAN_POLL_TIMEOUT_S = 5.0
 
     def __init__(
         self,
@@ -464,7 +472,7 @@ class AssistantQueryExecutor:
                     err_message = ", ".join(map(str, err.detail))
             if debug_timing:
                 logger.exception(f"{TIMING_LOG_PREFIX} Query execution failed after {elapsed:.3f}s: {err_message}")
-            raise MaxToolRetryableError(err_message)
+            raise MaxToolRetryableError(f"{await self._query_scan_block_for_error(err)}{err_message}")
         except Exception as err:
             elapsed = time.time() - start_time
             # Catch-all for unexpected errors during query execution. Surface the underlying error
@@ -487,10 +495,76 @@ class AssistantQueryExecutor:
         if isinstance(response_dict, dict) and (error := response_dict.get("error")):
             raise MaxToolRetryableError(str(error))
 
+        if isinstance(response_dict, dict):
+            await self._await_query_scan(response_dict)
+
         total_elapsed = time.time() - start_time
         if debug_timing:
             logger.warning(f"{TIMING_LOG_PREFIX} aexecute_query completed successfully in {total_elapsed:.3f}s")
         return response_dict
+
+    async def _await_query_scan(self, response: dict) -> None:
+        """Wait for the analysis of a slow run to land, so its findings reach the same reply as the
+        results.
+
+        The run that produced this response enqueued the analysis microseconds ago, so the findings
+        are worth a short wait: without them the assistant reports a slow answer and says nothing
+        about why. A failure here costs the advice, never the results.
+        """
+        try:
+            scan = response.get("query_scan")
+            if not isinstance(scan, dict) or scan.get("status") != QueryScanStatus.PENDING:
+                return
+            cache_key = response.get("cache_key")
+            if not isinstance(cache_key, str):
+                return
+            slot = await self._poll_query_scan_slot(cache_key)
+            if slot is None:
+                return
+            scan["status"] = str(slot.status)
+            scan["events_in_range"] = slot.events_in_range
+            scan["range"] = slot.range.model_dump(by_alias=True) if slot.range is not None else None
+            scan["killed"] = slot.killed
+            response["warnings"] = [
+                *(response.get("warnings") or []),
+                *(finding.model_dump(by_alias=True, exclude_none=True) for finding in slot.findings),
+            ]
+        except Exception:
+            logger.warning(f"{TIMING_LOG_PREFIX} query scan poll failed", exc_info=True)
+
+    async def _poll_query_scan_slot(self, cache_key: str) -> QueryScanSlot | None:
+        deadline = time.monotonic() + self.SCAN_POLL_TIMEOUT_S
+        while time.monotonic() < deadline:
+            await asyncio.sleep(self.SCAN_POLL_INTERVAL_S)
+            # Redis, not Postgres, but it blocks the same way, so keep it off the event loop.
+            slot = await database_sync_to_async(get_query_scan_slot, thread_sensitive=True)(self._team.pk, cache_key)
+            if slot is not None and slot.status == QueryScanStatus.DONE:
+                return slot
+        return None
+
+    async def _query_scan_block_for_error(self, error: Exception) -> str:
+        """The scan block for a run ClickHouse stopped, built from the scan the runner put on the
+        exception.
+
+        Every retry of such a query dies the same way, so this reply is the only place the person
+        can be told what to change.
+        """
+        try:
+            scan = getattr(error, "query_scan", None)
+            cache_key = getattr(error, "cache_key", None)
+            if not isinstance(scan, dict) or not isinstance(cache_key, str):
+                return ""
+            response: dict[str, Any] = {"query_scan": dict(scan), "warnings": []}
+            slot = await self._poll_query_scan_slot(cache_key)
+            if slot is not None:
+                response["query_scan"]["status"] = str(slot.status)
+                response["warnings"] = [
+                    finding.model_dump(by_alias=True, exclude_none=True) for finding in slot.findings
+                ]
+            return format_query_scan_warnings(response, self._team)
+        except Exception:
+            logger.warning(f"{TIMING_LOG_PREFIX} query scan block for a killed run failed", exc_info=True)
+            return ""
 
     async def _compress_results(
         self,
@@ -568,7 +642,11 @@ class AssistantQueryExecutor:
                     f"{TIMING_LOG_PREFIX} {formatter_name}.format() completed in {elapsed:.3f}s for {query_type}"
                 )
 
-            warning_prefix = format_warehouse_sync_warnings(response) + format_access_control_warnings(response)
+            warning_prefix = (
+                format_query_scan_warnings(response, self._team)
+                + format_warehouse_sync_warnings(response)
+                + format_access_control_warnings(response)
+            )
             if warning_prefix:
                 result = warning_prefix + result
             return result

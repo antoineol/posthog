@@ -2,15 +2,57 @@ import uuid
 from typing import cast
 
 import posthoganalytics
+from drf_spectacular.utils import OpenApiResponse
 from langchain_core.runnables import RunnableConfig
 from posthoganalytics.ai.langchain.callbacks import CallbackHandler
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from posthog.api.documentation import _FallbackSerializer, extend_schema
+from posthog.api.mixins import ValidatedRequest, validated_request
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.models.user import User
+
+
+class FixHogQLRequestSerializer(serializers.Serializer):
+    query = serializers.CharField(
+        help_text="The HogQL query to work on.",
+    )
+    error = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="The error the query returned. When set, the tool fixes that error and changes nothing else.",
+    )
+    connection_id = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text=(
+            "Id of the data warehouse connection the query runs against, so the tool sees that "
+            "connection's tables instead of only the ClickHouse catalog."
+        ),
+    )
+    instruction = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text=(
+            "A change to apply to the query, such as adding an event filter. Used only when `error` "
+            "is empty. The tool keeps the question the query answers the same."
+        ),
+    )
+
+
+class FixHogQLResponseSerializer(serializers.Serializer):
+    query = serializers.CharField(help_text="The updated HogQL query.")
+    trace_id = serializers.CharField(help_text="Id of the LLM trace, for support and debugging.")
+
+
+class FixHogQLErrorSerializer(serializers.Serializer):
+    error = serializers.CharField(help_text="Why the query could not be updated.")
+    trace_id = serializers.CharField(help_text="Id of the LLM trace, for support and debugging.")
 
 
 class FixHogQLViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
@@ -21,18 +63,21 @@ class FixHogQLViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     def list(self, request: Request, *args, **kwargs) -> Response:
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
-    def create(self, request: Request, *args, **kwargs) -> Response:
+    @validated_request(
+        FixHogQLRequestSerializer,
+        responses={
+            200: OpenApiResponse(response=FixHogQLResponseSerializer, description="The updated query."),
+            400: OpenApiResponse(response=FixHogQLErrorSerializer, description="The query could not be updated."),
+        },
+        summary="Fix or change a HogQL query",
+    )
+    def create(self, request: ValidatedRequest, *args, **kwargs) -> Response:
         from products.data_warehouse.backend.facade.api import HogQLQueryFixerTool
 
-        query = request.data.get("query", None)
-        error = request.data.get("error", "")
-        connection_id = request.data.get("connection_id", None)
-
-        if query is None:
-            return Response(
-                status=status.HTTP_400_BAD_REQUEST,
-                data={"message": "No query provided"},
-            )
+        query = request.validated_data["query"]
+        error = request.validated_data["error"]
+        connection_id = request.validated_data["connection_id"]
+        instruction = request.validated_data["instruction"]
 
         trace_id = f"fix_hogql_query_{uuid.uuid4()}"
         user = cast(User, request.user)
@@ -45,6 +90,8 @@ class FixHogQLViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         # sees that connection's tables instead of only the ClickHouse catalog.
         if connection_id:
             fix_hogql_context["connection_id"] = connection_id
+        if instruction:
+            fix_hogql_context["instruction"] = instruction
 
         config: RunnableConfig = {
             "configurable": {

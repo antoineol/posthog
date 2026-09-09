@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,9 @@ from posthog.schema import (
     TrendsQuery,
 )
 
+from posthog.query_scan.findings import format_rows, format_seconds
+from posthog.query_scan.flag import DEFAULT_FLOOR_MS, get_query_scan_flag
+
 from .boxplot import BoxPlotResultsFormatter
 from .funnel import FunnelResultsFormatter
 from .lifecycle import LifecycleResultsFormatter
@@ -48,12 +52,46 @@ def get_boxplot_results(response: dict[str, Any]) -> list[Any]:
     return results if results else response.get("boxplot_data", [])
 
 
+# A warning message can carry names the project's own event data supplies, and anyone capturing
+# events controls those. The message goes verbatim into agent context, so strip control characters,
+# newlines AND angle brackets — the latter stops a crafted name (for example one containing
+# `</taxonomy_warnings>`) from closing the wrapper early and breaking out of the delimited block —
+# and cap length. This can't stop plain-text influence (no escaping can), but it keeps the names
+# contained as data inside the labeled block.
+_UNSAFE_WARNING_CHARS = re.compile(r"[\x00-\x1f\x7f<>]")
+_MAX_WARNING_CHARS = 300
+
+QUERY_SCAN_WARNING_TAG = "query_scan_warning"
+
+_QUERY_SCAN_LEAD = "This query read {rows} rows in {secs} s, far more than it needs."
+_QUERY_SCAN_KILLED_LEAD = "ClickHouse stopped this query after {secs} s, having read {rows} rows."
+_QUERY_SCAN_INSTRUCTION = (
+    "Before running it again: tell the user which filter is missing, propose a specific change that "
+    "keeps the question the same, and ask them to confirm. Do not narrow the query without saying so."
+)
+_QUERY_SCAN_SHORT_FORM = (
+    "This query read {rows} rows in {secs} s. This is likely far more than needed; check the event "
+    "filter and the start date before running it again."
+)
+
+
+def sanitize_warning_line(message: str) -> str:
+    cleaned = re.sub(r"\s+", " ", _UNSAFE_WARNING_CHARS.sub(" ", message)).strip()
+    return cleaned[:_MAX_WARNING_CHARS] + "…" if len(cleaned) > _MAX_WARNING_CHARS else cleaned
+
+
+def _warning_messages(response: dict[str, Any], warning_type: str) -> list[str]:
+    return [
+        sanitize_warning_line(w["message"])
+        for w in (response.get("warnings") or [])
+        if w.get("type") == warning_type and w.get("message")
+    ]
+
+
 def _format_warnings(response: dict[str, Any], warning_type: str, header: str) -> str:
     """Select one kind of warning from the shared `warnings` list (by its `type` tag) and render it
     as a leading block. Empty string when there's nothing to show."""
-    messages = [
-        w["message"] for w in (response.get("warnings") or []) if w.get("type") == warning_type and w.get("message")
-    ]
+    messages = _warning_messages(response, warning_type)
     if not messages:
         return ""
     # Trailing blank line so consecutive blocks (and the results after them) don't run together.
@@ -71,6 +109,60 @@ def format_access_control_warnings(response: dict[str, Any]) -> str:
     # can mistake a possibly-partial result for the full set. The message is a full sentence
     # ("Results may exclude ..."), so the header is just the block label.
     return _format_warnings(response, "access_control", "[Access control]")
+
+
+def format_query_scan_warnings(response: dict[str, Any], team: "Team | None" = None) -> str:
+    """Tell the agent that this run read far more data than the question needs, and what to change.
+
+    The block is the only channel to an outside MCP agent, so the standing instruction is inside it
+    rather than only in the in-app assistant's prompt. `log_only` teams get nothing: the flag mode
+    says what a client may show.
+    """
+    scan = response.get("query_scan")
+    if not isinstance(scan, dict) or scan.get("mode") != "show":
+        return ""
+    rows_read = scan.get("rows_read")
+    duration_ms = scan.get("duration_ms")
+    if not isinstance(rows_read, int) or not isinstance(duration_ms, int):
+        return ""
+
+    numbers = {"rows": format_rows(rows_read), "secs": format_seconds(duration_ms)}
+    messages = _warning_messages(response, "query_scan")
+    if not messages:
+        return _format_pending_query_scan(scan, numbers, duration_ms, team)
+
+    lead = _QUERY_SCAN_KILLED_LEAD if scan.get("killed") else _QUERY_SCAN_LEAD
+    return "\n".join(
+        [
+            f"<{QUERY_SCAN_WARNING_TAG}>",
+            lead.format(**numbers),
+            *(f"- {message}" for message in messages),
+            _QUERY_SCAN_INSTRUCTION,
+            f"</{QUERY_SCAN_WARNING_TAG}>",
+            "",
+            "",
+        ]
+    )
+
+
+def _format_pending_query_scan(
+    scan: dict[str, Any], numbers: dict[str, str], duration_ms: int, team: "Team | None"
+) -> str:
+    """The short form, for a run whose analysis has not landed yet.
+
+    A finished analysis that found nothing is silence: the query was slow for a reason we have no
+    advice about. A pending one still means the person waited, which is worth saying on its own.
+    """
+    if scan.get("status") != "pending" or duration_ms < _query_scan_floor_ms(team):
+        return ""
+    return f"<{QUERY_SCAN_WARNING_TAG}>{_QUERY_SCAN_SHORT_FORM.format(**numbers)}</{QUERY_SCAN_WARNING_TAG}>\n\n"
+
+
+def _query_scan_floor_ms(team: "Team | None") -> int:
+    if team is None:
+        return DEFAULT_FLOOR_MS
+    flag = get_query_scan_flag(team)
+    return flag.floor_ms if flag is not None else DEFAULT_FLOOR_MS
 
 
 def format_query_results_for_llm(
@@ -115,7 +207,11 @@ def format_query_results_for_llm(
 
     if formatted is None:
         return None
-    warning_prefix = format_warehouse_sync_warnings(response) + format_access_control_warnings(response)
+    warning_prefix = (
+        format_query_scan_warnings(response, team)
+        + format_warehouse_sync_warnings(response)
+        + format_access_control_warnings(response)
+    )
     return warning_prefix + formatted if warning_prefix else formatted
 
 
@@ -132,5 +228,7 @@ __all__ = [
     "NULL_MARKER",
     "format_access_control_warnings",
     "format_query_results_for_llm",
+    "format_query_scan_warnings",
     "format_warehouse_sync_warnings",
+    "sanitize_warning_line",
 ]
