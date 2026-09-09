@@ -22,6 +22,7 @@ from products.subscriptions.backend.facade.measurements import canonicalize_meas
 from products.subscriptions.backend.facade.recommendations import (
     Recommendation,
     RecommendationCitation,
+    RecommendationEffort,
     RecommendationGenerationHandle,
     RecommendationGenerationInput,
     RecommendationResult,
@@ -132,6 +133,10 @@ class ProactiveHistoryEntryDTO:
     delivery_id: UUID
     recommendation_title: str
     why_now: str | None
+    confidence: float | None
+    effort: RecommendationEffort | None
+    metric_direction: Literal["increase", "decrease"] | None
+    expected_metric_movement: str | None
     citations: tuple[ProactiveHistoryCitationDTO, ...]
     artifact: ProactiveArtifactHistoryDTO | None
     outcome: ProactiveOutcomeHistoryDTO | None
@@ -170,6 +175,10 @@ def _history_entry(
         delivery_id=run.delivery_id,
         recommendation_title=title,
         why_now=_history_text(payload.get("why_now")),
+        confidence=_history_confidence(payload.get("confidence")),
+        effort=_history_effort(payload.get("effort")),
+        metric_direction=_history_metric_direction(payload.get("metric_direction")),
+        expected_metric_movement=_history_text(payload.get("expected_metric_movement")),
         citations=_history_citations(recommendation.citations),
         artifact=_history_artifact(recommendation),
         outcome=_history_outcome(recommendation),
@@ -232,6 +241,21 @@ def _history_outcome(recommendation: ProactiveRecommendation) -> ProactiveOutcom
 
 def _history_text(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _history_confidence(value: object) -> float | None:
+    return float(value) if not isinstance(value, bool) and isinstance(value, (int, float)) and 0 <= value <= 1 else None
+
+
+def _history_effort(value: object) -> RecommendationEffort | None:
+    return (
+        cast(RecommendationEffort, value) if isinstance(value, str) and value in {"small", "medium", "large"} else None
+    )
+
+
+def _history_metric_direction(value: object) -> Literal["increase", "decrease"] | None:
+    normalized = value.strip().lower() if isinstance(value, str) else None
+    return cast(Literal["increase", "decrease"], normalized) if normalized in {"increase", "decrease"} else None
 
 
 def _safe_history_url(value: object) -> str | None:
