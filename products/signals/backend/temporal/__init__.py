@@ -60,10 +60,6 @@ from products.signals.backend.temporal.reingestion import (
     restore_grouping_pause_activity,
     soft_delete_report_signals_activity,
 )
-from products.signals.backend.temporal.report_metric_refresh import (
-    ACTIVITIES as REPORT_METRIC_REFRESH_ACTIVITIES,
-    WORKFLOWS as REPORT_METRIC_REFRESH_WORKFLOWS,
-)
 from products.signals.backend.temporal.report_safety_judge import report_safety_judge_activity
 from products.signals.backend.temporal.safety_filter import safety_filter_activity
 from products.signals.backend.temporal.signal_queries import (
@@ -106,7 +102,6 @@ WORKFLOWS = [
     RunScoutSuggestionsWorkflow,
     ScoutSuggestionsCoordinatorWorkflow,
     SignalReportInboxNotificationWorkflow,
-    *REPORT_METRIC_REFRESH_WORKFLOWS,
 ]
 
 ACTIVITIES = [
@@ -163,5 +158,4 @@ ACTIVITIES = [
     soft_delete_report_signals_activity,
     verify_match_specificity_activity,
     wait_for_signal_in_clickhouse_activity,
-    *REPORT_METRIC_REFRESH_ACTIVITIES,
 ]
