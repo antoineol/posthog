@@ -4,7 +4,8 @@ The job rebuilds the query the person ran, asks ClickHouse how it planned to rea
 the project's events over the same range, runs the structural checks, and stores the result in
 the scan slot. It runs on the offline pool, once per query per slot lifetime.
 
-Every ClickHouse read goes through ``sync_execute`` here, so one patch covers the whole job.
+The EXPLAIN and the events count go through ``sync_execute`` here; the person count is a HogQL
+query, so a test patches both.
 """
 
 from __future__ import annotations
@@ -18,11 +19,11 @@ from dateutil.relativedelta import relativedelta
 
 from posthog.schema import HogQLFilters, HogQLQueryModifiers, PersonsOnEventsMode, QueryScanRange, QueryScanStatus
 
-from posthog.hogql.constants import LimitContext
+from posthog.hogql.constants import HogQLGlobalSettings, LimitContext
 from posthog.hogql.context import HogQLContext
 from posthog.hogql.parser import parse_select
 from posthog.hogql.placeholders import find_placeholders
-from posthog.hogql.query import HogQLQueryExecutor
+from posthog.hogql.query import HogQLQueryExecutor, execute_hogql_query
 
 from posthog.clickhouse.client import sync_execute
 from posthog.clickhouse.client.connection import Workload
@@ -189,9 +190,7 @@ def _analyze_hogql(runner: HogQLQueryRunner, job: QueryScanJob, thresholds: Scan
         plan=plan,
         rows_read=job.rows_read,
         duration_ms=job.duration_ms,
-        killed=job.killed,
         events_in_range=counted.events,
-        min_timestamp=counted.min_timestamp,
         person_rows=person_rows,
         has_filters_placeholder=has_filters_placeholder,
         thresholds=thresholds,
@@ -245,7 +244,6 @@ def _analyze_settings(runner: QueryRunner, job: QueryScanJob, thresholds: ScanTh
         date_to=date_to,
         rows_read=job.rows_read,
         duration_ms=job.duration_ms,
-        killed=job.killed,
         events_in_range=counted.events,
         thresholds=thresholds,
     )
@@ -379,17 +377,21 @@ def _count_events_in_range(
 
 
 def _count_person_rows(team: Team) -> int:
-    """Person versions for the project, which is what the deduplicating subquery reads."""
+    """Person versions for the project, which is what the deduplicating subquery reads.
+
+    `raw_persons` is every row of the ClickHouse persons table, old versions included, so the
+    count matches what the subquery scans. Personhog counts persons, not versions.
+    """
     with tags_context(product=Product.PRODUCT_ANALYTICS, feature=Feature.QUERY_SCAN):
-        rows = sync_execute(
-            "SELECT count() FROM person WHERE team_id = %(team_id)s",
-            {"team_id": team.pk},
-            settings={"max_execution_time": MAX_EXECUTION_TIME_SECONDS},
+        response = execute_hogql_query(
+            query="SELECT count() FROM raw_persons",
+            team=team,
+            query_type="query_scan_person_rows",
             workload=Workload.OFFLINE,
-            team_id=team.pk,
-            readonly=True,
+            settings=HogQLGlobalSettings(max_execution_time=MAX_EXECUTION_TIME_SECONDS),
         )
-    return rows[0][0]
+        rows = response.results or []
+    return int(rows[0][0]) if rows else 0
 
 
 def _slot_range(

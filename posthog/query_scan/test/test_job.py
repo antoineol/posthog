@@ -73,7 +73,14 @@ class TestQueryScanJob(BaseTest):
                 return [(EVENTS_IN_RANGE, datetime(2025, 8, 5))]
             return [(200_000,)]
 
-        with mock.patch("posthog.query_scan.job.sync_execute", side_effect=execute):
+        def count_persons(query: str, **kwargs: Any) -> Any:
+            executed.append(query)
+            return mock.Mock(results=[[200_000]])
+
+        with (
+            mock.patch("posthog.query_scan.job.sync_execute", side_effect=execute),
+            mock.patch("posthog.query_scan.job.execute_hogql_query", side_effect=count_persons),
+        ):
             run_query_scan(self._job(sql=sql) if sql is not None else self._job())
         return executed
 
@@ -158,7 +165,7 @@ class TestQueryScanJob(BaseTest):
 
         counts = [query for query in executed if not query.startswith("EXPLAIN")]
         assert any("min(timestamp)" in query for query in counts) is expect_events_count
-        assert any("FROM person " in query for query in counts) is expect_person_count
+        assert any("FROM raw_persons" in query for query in counts) is expect_person_count
 
     def test_the_event_count_uses_the_exact_bounds_the_query_gave(self) -> None:
         # Rounding an explicit range out to whole days would count a day the query never read and
