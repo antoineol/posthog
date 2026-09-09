@@ -15,7 +15,7 @@ import structlog
 
 from posthog.dataclasses import frozen
 from posthog.models.team.team import Team
-from posthog.query_scan.flag import get_query_scan_flag
+from posthog.query_scan.flag import QueryScanFlag, get_query_scan_flag
 from posthog.query_scan.slot import (
     QueryScanSlot,
     get as get_slot,
@@ -27,8 +27,10 @@ logger = structlog.get_logger(__name__)
 @frozen(eq=False)
 class _SlotLookup:
     """``over_floor`` says whether the response is one a slot could exist for, which is what
-    tells an absent slot apart from a query that was never a candidate."""
+    tells an absent slot apart from a query that was never a candidate. ``flag`` is the state
+    in force now, which a cached response cannot know."""
 
+    flag: QueryScanFlag | None
     over_floor: bool
     slot: QueryScanSlot | None = None
 
@@ -40,7 +42,18 @@ def attach_scan_slot(team: Team, response: Any) -> None:
         if summary is None:
             return
         lookup = _look_up(team, summary.duration_ms, getattr(response, "cache_key", None))
+        if lookup.flag is None:
+            # The flag is the kill switch, and a cached body outlives it by up to a week, so a
+            # summary that survived a rollback goes rather than claiming a mode nobody granted.
+            response.query_scan = None
+            return
+        # The cached body carries the mode of the run that filled it, which an operator can have
+        # moved since.
+        summary.mode = lookup.flag.mode
         if not lookup.over_floor:
+            # Below the floor nothing reads the slot, so a status from the old floor cannot be
+            # confirmed.
+            summary.status = None
             return
         if lookup.slot is None:
             # A cached response can carry the status of a run whose slot has since expired.
@@ -58,16 +71,19 @@ def attach_scan_slot(team: Team, response: Any) -> None:
         logger.warning("query_scan_attach_failed", team_id=team.pk, exc_info=True)
 
 
-def scan_summary_with_findings(team: Team, summary: dict[str, Any], cache_key: str | None) -> dict[str, Any]:
+def scan_summary_with_findings(team: Team, summary: dict[str, Any], cache_key: str | None) -> dict[str, Any] | None:
     """The same fold for a surface that carries plain dicts rather than the response model.
 
     Dashboard tiles never see the response's ``warnings`` list, so the findings ride on the
-    summary itself.
+    summary itself. None when the flag is off, which is how the tile shows nothing.
     """
     try:
         lookup = _look_up(team, summary.get("duration_ms"), cache_key)
+        if lookup.flag is None:
+            return None
+        summary = {**summary, "mode": lookup.flag.mode}
         if not lookup.over_floor:
-            return summary
+            return {**summary, "status": None}
         if lookup.slot is None:
             return {**summary, "status": None}
         folded = {**summary, "status": str(lookup.slot.status)}
@@ -85,9 +101,13 @@ def scan_summary_with_findings(team: Team, summary: dict[str, Any], cache_key: s
 
 
 def _look_up(team: Team, duration_ms: Any, cache_key: str | None) -> _SlotLookup:
-    if cache_key is None or not isinstance(duration_ms, int):
-        return _SlotLookup(over_floor=False)
+    # The flag is resolved first because a cached summary has to be corrected against it even
+    # when no slot is read. It is held in-process for a minute, so this costs no round trip.
     flag = get_query_scan_flag(team)
-    if flag is None or duration_ms < flag.floor_ms:
-        return _SlotLookup(over_floor=False)
-    return _SlotLookup(over_floor=True, slot=get_slot(team.pk, cache_key, thresholds=flag.thresholds_fingerprint))
+    if flag is None:
+        return _SlotLookup(flag=None, over_floor=False)
+    if cache_key is None or not isinstance(duration_ms, int) or duration_ms < flag.floor_ms:
+        return _SlotLookup(flag=flag, over_floor=False)
+    return _SlotLookup(
+        flag=flag, over_floor=True, slot=get_slot(team.pk, cache_key, thresholds=flag.thresholds_fingerprint)
+    )

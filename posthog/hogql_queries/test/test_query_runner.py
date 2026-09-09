@@ -214,6 +214,8 @@ class TestQueryRunner(BaseTest):
         runner = TestQueryRunner(query={"some_attr": "bla"}, team=self.team)
         with (
             mock.patch("posthog.hogql_queries.query_runner.get_query_scan_flag", return_value=flag),
+            # The serving side re-reads the flag to correct a summary cached under an older one.
+            mock.patch("posthog.query_scan.serve.get_query_scan_flag", return_value=flag),
             mock.patch.object(
                 TestQueryRunner, "_calculate", autospec=True, side_effect=_calculate_recording_clickhouse_stats
             ),
