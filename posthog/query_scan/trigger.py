@@ -10,7 +10,7 @@ failure drops the enqueue and reports a skip, never the query result.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 from pydantic import BaseModel
@@ -27,9 +27,14 @@ from posthog.query_scan.slot import (
     set_pending,
 )
 
+if TYPE_CHECKING:
+    from posthog.models.user import User
+
 logger = structlog.get_logger(__name__)
 
-SkipReason = Literal["flag_off", "below_floor", "api_key", "not_cacheable", "slot_exists", "enqueue_failed"]
+SkipReason = Literal[
+    "flag_off", "below_floor", "api_key", "no_principal", "not_cacheable", "slot_exists", "enqueue_failed"
+]
 
 
 @frozen
@@ -63,7 +68,7 @@ def maybe_trigger_query_scan(
     insight_id: int | None,
     dashboard_id: int | None,
     trigger: str,
-    user_id: int | None,
+    user: User | None,
     cacheable: bool,
     killed: bool = False,
     error_type: str | None = None,
@@ -82,6 +87,13 @@ def maybe_trigger_query_scan(
     if is_api_key_access_method(get_query_tag_value("access_method")):
         # An API caller has no surface to read the advice on, so analyzing costs without paying.
         return QueryScanTrigger(triggered=False, skipped_reason="api_key")
+    # A shared-link viewer and a service token both bypass warehouse access control while the
+    # query runs, and neither survives the trip to the worker: the job resolves no user at all,
+    # which fails closed on every warehouse table. The rebuild would be narrower than the run,
+    # so the analysis could only fail and park a pending slot until it expired.
+    user_id = user.id if user is not None else None
+    if user is not None and user_id is None:
+        return QueryScanTrigger(triggered=False, skipped_reason="no_principal")
     if not cacheable:
         return QueryScanTrigger(triggered=False, skipped_reason="not_cacheable")
     if get_slot(team_id, cache_key, thresholds=flag.thresholds_fingerprint) is not None:

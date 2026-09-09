@@ -2549,7 +2549,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                     insight_id=insight_id,
                     dashboard_id=dashboard_id,
                     trigger="fresh",
-                    user_id=user.id if user else None,
+                    user=user,
                     cacheable=cacheable,
                 )
                 if scan.triggered:
@@ -2625,7 +2625,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                 insight_id=insight_id,
                 dashboard_id=dashboard_id,
                 trigger="killed",
-                user_id=user.id if user else None,
+                user=user,
                 # A killed run has no result to cache, so only the export exclusion applies.
                 cacheable=self.limit_context != LimitContext.EXPORT,
                 killed=True,

@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from typing import Any
 
 from unittest import mock
@@ -14,8 +15,15 @@ from posthog.hogql.query_stats import QueryStats
 from posthog.clickhouse.query_tagging import AccessMethod, reset_query_tags, tag_queries
 from posthog.query_scan.flag import QueryScanFlag
 from posthog.query_scan.trigger import maybe_trigger_query_scan
+from posthog.shared_link_user import SharedLinkUser
 
 FLAG = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5)
+
+
+def _shared_link_user() -> SharedLinkUser:
+    # Bypasses warehouse access control while the query runs, but carries no id the worker can
+    # resolve back, so the job would rebuild the query as no user at all.
+    return SharedLinkUser(SimpleNamespace(enabled=True, team_id=1))  # type: ignore[arg-type]
 
 
 def _tag_as_api_key(test: "TestQueryScanTrigger") -> None:
@@ -50,7 +58,7 @@ class TestQueryScanTrigger(SimpleTestCase):
             "insight_id": None,
             "dashboard_id": None,
             "trigger": "fresh",
-            "user_id": None,
+            "user": None,
             "cacheable": True,
         }
         return maybe_trigger_query_scan(**{**arguments, **overrides})
@@ -60,6 +68,7 @@ class TestQueryScanTrigger(SimpleTestCase):
             ("flag off", {"flag": None}, None, "flag_off"),
             ("below the floor", {"stats": QueryStats(rows_read=10, duration_ms=999.0)}, None, "below_floor"),
             ("api key run", {}, _tag_as_api_key, "api_key"),
+            ("shared link viewer", {"user": _shared_link_user()}, None, "no_principal"),
             ("result not cacheable", {"cacheable": False}, None, "not_cacheable"),
             ("slot already exists", {}, _store_a_slot, "slot_exists"),
         ]
