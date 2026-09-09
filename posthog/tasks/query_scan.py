@@ -6,12 +6,17 @@ from posthog.celery_queues import CeleryQueue
 from posthog.models.team.team import Team
 from posthog.models.user import User
 from posthog.query_scan.job import QueryScanJob, run_query_scan
+from posthog.query_scan.slot import PENDING_TTL_SECONDS
 from posthog.scoping_audit import skip_team_scope_audit
 
 
 # The queue cache warming and lazy precompute use, so a burst of analyses cannot overwhelm
 # ClickHouse. The job is advisory, so a lost run costs nothing and there is no retry.
-@shared_task(ignore_result=True, queue=CeleryQueue.ANALYTICS_LIMITED.value)
+#
+# The copy dies with the pending slot that claims it. Outliving that claim would let the next
+# slow run of the same query enqueue a second copy, and a backlog would then collect one copy
+# per query per claim lifetime, all of them re-running the same analysis on recovery.
+@shared_task(ignore_result=True, queue=CeleryQueue.ANALYTICS_LIMITED.value, expires=PENDING_TTL_SECONDS)
 @skip_team_scope_audit  # Team and User are not team-scoped models
 def analyze_query_scan(
     team_id: int,
