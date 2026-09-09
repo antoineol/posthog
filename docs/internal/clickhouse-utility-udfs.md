@@ -5,10 +5,6 @@ Before emitting JSON for insertion, it sorts the keys in `$feature_flags` alphab
 This also applies to existing `$feature_flags` objects, after cleanup resolves duplicates and expands dotted keys.
 Flag values and person-property ordering follow the existing cleanup rules.
 
-Invalid scalar and array `$feature_flags` values are replaced with an empty map and retained in
-`$unparseable_properties`, alongside other invalid complex properties. This keeps malformed
-map values from failing insertion into the typed JSON column while preserving unrelated properties.
-
 Whole-properties reads omit empty defaults for declared array paths. Custom empty arrays and
 array positions remain intact; typed arrays cannot distinguish an absent field from an explicit empty array.
 
