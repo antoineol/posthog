@@ -32,6 +32,7 @@ import { alertsToThresholdGoalLines, insightAlertsLogic } from 'products/alerts/
 import { DataNodeLogicProps, dataNodeLogic } from '../DataNode/dataNodeLogic'
 import { DateRange } from '../DataNode/DateRange'
 import { ElapsedTime } from '../DataNode/ElapsedTime'
+import { QueryScanBanner } from '../DataNode/QueryScanBanner'
 import { Reload } from '../DataNode/Reload'
 import { QueryFeature } from '../DataTable/queryFeatures'
 import { PieChart } from './Components/Charts/PieChart'
@@ -216,7 +217,8 @@ function InternalDataTableVisualization(props: DataTableVisualizationProps): JSX
 
     const { toggleChartSettingsPanel } = useActions(dataVisualizationLogic)
 
-    const { queryId, pollResponse } = useValues(dataNodeLogic)
+    // No editor here to write a fixed query into, so the advice comes without a "Fix with AI" button.
+    const { queryId, pollResponse, queryScan } = useValues(dataNodeLogic)
 
     const setQuerySource = useCallback(
         (source: HogQLQuery) => props.setQuery?.({ ...props.query, source }),
@@ -417,6 +419,8 @@ function InternalDataTableVisualization(props: DataTableVisualizationProps): JSX
                 )}
 
                 {!props.embedded && <VariablesForInsight />}
+
+                <QueryScanBanner queryScan={queryScan} />
 
                 <div className="flex flex-1 flex-row gap-4">
                     {/* The gear above toggles this panel (Series/Display tabs) — same layout the

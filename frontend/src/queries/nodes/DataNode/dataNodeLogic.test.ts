@@ -1,5 +1,6 @@
 import { expectLogic, partial } from 'kea-test-utils'
 
+import { useMocks } from '~/mocks/jest'
 import { dataNodeLogic } from '~/queries/nodes/DataNode/dataNodeLogic'
 import { performQuery } from '~/queries/query'
 import { DashboardFilter, HogQLVariable, NodeKind } from '~/queries/schema/schema-general'
@@ -784,5 +785,68 @@ describe('dataNodeLogic', () => {
             false,
             undefined
         )
+    })
+
+    it('folds a finished query scan into the response after polling for it', async () => {
+        // The scan is written by a job that outlives the run, so a response can arrive with the
+        // analysis still pending and the advice has to catch up without another run.
+        jest.useFakeTimers()
+        try {
+            let scanCalls = 0
+            useMocks({
+                get: {
+                    '/api/environments/:team_id/query/:cache_key/scan/': () => {
+                        scanCalls += 1
+                        return [
+                            200,
+                            {
+                                status: scanCalls === 1 ? 'pending' : 'done',
+                                warnings:
+                                    scanCalls === 1
+                                        ? []
+                                        : [
+                                              {
+                                                  type: 'query_scan',
+                                                  kind: 'no_event_filter',
+                                                  message: 'This query read every event in its date range.',
+                                                  fix: 'Add an event filter.',
+                                                  rows_read: 10,
+                                                  duration_ms: 2000,
+                                              },
+                                          ],
+                                events_in_range: 1000,
+                                range: { from: '2026-01-01', to: '2026-02-01' },
+                                killed: false,
+                            },
+                        ]
+                    },
+                },
+            })
+            mockedQuery.mockResolvedValueOnce({
+                results: [],
+                cache_key: 'cache-key',
+                query_scan: { mode: 'show', rows_read: 10, duration_ms: 2000, status: 'pending' },
+            })
+
+            logic = dataNodeLogic({
+                key: testUniqueKey,
+                query: setLatestVersionsOnQuery({ kind: NodeKind.EventsQuery, select: ['*'] }),
+            })
+            logic.mount()
+            await jest.advanceTimersByTimeAsync(0)
+            expect(logic.values.queryScan?.summary.status).toBe('pending')
+
+            await jest.advanceTimersByTimeAsync(2000)
+            expect(scanCalls).toBe(1)
+            expect(logic.values.queryScan?.summary.status).toBe('pending')
+
+            await jest.advanceTimersByTimeAsync(3000)
+            expect(scanCalls).toBe(2)
+            expect(logic.values.queryScan?.summary.status).toBe('done')
+            expect(logic.values.queryScan?.summary.events_in_range).toBe(1000)
+            expect(logic.values.queryScan?.findings).toHaveLength(1)
+        } finally {
+            jest.useRealTimers()
+        }
     })
 })

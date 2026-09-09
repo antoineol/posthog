@@ -83,6 +83,7 @@ import {
     copyTableToJson,
     copyTableToMarkdown,
 } from '../../../queries/nodes/DataTable/clipboardUtils'
+import { EditorQueryScanBanner } from './components/EditorQueryScanBanner'
 import { FixErrorButton } from './components/FixErrorButton'
 import { QueryIndexUsageBar } from './output-pane-tabs/QueryIndexUsageBar'
 import { OutputTab, outputPaneLogic } from './outputPaneLogic'
@@ -1163,6 +1164,7 @@ const ErrorState = ({ responseError, sourceQuery, queryCancelled, response }: an
                         <FixErrorButton contentOverride="Fix error with AI" type="primary" source="query-error" />
                     }
                 />
+                <EditorQueryScanBanner />
             </div>
         </div>
     )
@@ -1274,6 +1276,7 @@ const Content = ({
         return (
             <div className="absolute inset-0 flex flex-col border-t overflow-hidden">
                 <QueryWarningsBanner warnings={response?.warnings} />
+                <EditorQueryScanBanner />
                 <div className="flex flex-col flex-1 min-h-0 hide-scrollbar overflow-auto">
                     <InternalDataTableVisualization
                         uniqueKey={vizKey}
@@ -1345,6 +1348,7 @@ const Content = ({
         return (
             <div className="flex flex-col flex-1 min-h-0 w-full overflow-hidden">
                 <QueryWarningsBanner warnings={response?.warnings} />
+                <EditorQueryScanBanner />
                 {rows.length === 0 ? (
                     <EmptyResultsState />
                 ) : (

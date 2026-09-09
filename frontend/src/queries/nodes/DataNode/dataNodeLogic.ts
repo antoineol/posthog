@@ -32,6 +32,7 @@ import { teamLogic } from 'scenes/teamLogic'
 import { userLogic } from 'scenes/userLogic'
 
 import { DataNodeCollectionProps, dataNodeCollectionLogic } from '~/queries/nodes/DataNode/dataNodeCollectionLogic'
+import { QueryScanApiResponse, QueryScanState, resolveQueryScan } from '~/queries/nodes/DataNode/queryScan'
 import { removeExpressionComment } from '~/queries/nodes/DataTable/utils'
 import { performQuery } from '~/queries/query'
 import {
@@ -145,6 +146,9 @@ export interface DataNodeLogicProps {
 
 export const AUTOLOAD_INTERVAL = 30000
 const LOAD_MORE_ROWS_LIMIT = 10000
+
+/** Waits between the run and each ask for its scan, so the endpoint is asked at 2 s and at 5 s. */
+export const QUERY_SCAN_POLL_DELAYS_MS = [2000, 3000]
 
 // Loading and error states render the query id, so a random id per load
 // makes Storybook visual regression captures differ on every run
@@ -296,6 +300,8 @@ export interface dataNodeLogicValues {
     queryLog: HogQLQueryResponse | null
     queryLogLoading: boolean
     queryLogQueryId: string | null
+    queryScan: QueryScanState | null
+    queryScanResult: QueryScanApiResponse | null
     response:
         | ErrorTrackingQueryResponse
         | HogQLAutocompleteResponse
@@ -577,6 +583,9 @@ export interface dataNodeLogicActions {
         totalCount: number | null
         payload?: any
     }
+    pollQueryScan: () => {
+        value: true
+    }
     resetLoadingTimer: () => {
         value: true
     }
@@ -591,6 +600,9 @@ export interface dataNodeLogicActions {
     }
     setQueryLogQueryId: (queryId: string) => {
         queryId: string
+    }
+    setQueryScanResult: (result: QueryScanApiResponse) => {
+        result: QueryScanApiResponse
     }
     setResponse: (
         response: Exclude<AnyResponseType, undefined>
@@ -862,6 +874,25 @@ export interface dataNodeLogicMeta {
         hasActiveFilters: (query: DataNode<Record<string, any>>) => boolean
         totalCountQuery: (query: DataNode<Record<string, any>>) => DataNode | null
         filteredCountQuery: (query: DataNode<Record<string, any>>, hasActiveFilters: boolean) => DataNode | null
+        queryScan: (
+            response:
+                | ErrorTrackingQueryResponse
+                | HogQLAutocompleteResponse
+                | HogQLMetadataResponse
+                | HogQLQueryResponse<any[]>
+                | HogQueryResponse
+                | LogAttributesQueryResponse
+                | LogValuesQueryResponse
+                | MetricsQueryResponse
+                | Record<string, any>
+                | SessionsQueryResponse
+                | TraceSpansAggregationQueryResponse
+                | TraceSpansAttributeBreakdownQueryResponse
+                | TraceSpansQueryResponse
+                | null,
+            responseErrorObject: Record<string, any> | null,
+            queryScanResult: QueryScanApiResponse | null
+        ) => QueryScanState | null
     }
 }
 
@@ -959,6 +990,8 @@ export const dataNodeLogic = kea<dataNodeLogicType>([
         resetLoadingTimer: true,
         setQueryLogQueryId: (queryId: string) => ({ queryId }),
         loadFilteredCount: true,
+        pollQueryScan: true,
+        setQueryScanResult: (result: QueryScanApiResponse) => ({ result }),
     }),
     loaders(({ actions, cache, values, props }) => ({
         response: [
@@ -1319,6 +1352,13 @@ export const dataNodeLogic = kea<dataNodeLogicType>([
                 loadData: () => null,
                 loadDataFailure: (_, { errorObject }) => errorObject,
                 loadDataSuccess: () => null,
+            },
+        ],
+        queryScanResult: [
+            null as QueryScanApiResponse | null,
+            {
+                loadData: () => null,
+                setQueryScanResult: (_, { result }) => result,
             },
         ],
         responseError: [
@@ -1984,6 +2024,28 @@ export const dataNodeLogic = kea<dataNodeLogicType>([
                 return null
             },
         ],
+        queryScan: [
+            (s) => [s.response, s.responseErrorObject, s.queryScanResult],
+            (
+                response:
+                    | ErrorTrackingQueryResponse
+                    | HogQLAutocompleteResponse
+                    | HogQLMetadataResponse
+                    | HogQLQueryResponse<any[]>
+                    | HogQueryResponse
+                    | LogAttributesQueryResponse
+                    | LogValuesQueryResponse
+                    | MetricsQueryResponse
+                    | Record<string, any>
+                    | SessionsQueryResponse
+                    | TraceSpansAggregationQueryResponse
+                    | TraceSpansAttributeBreakdownQueryResponse
+                    | TraceSpansQueryResponse
+                    | null,
+                responseErrorObject: Record<string, any> | null,
+                queryScanResult: QueryScanApiResponse | null
+            ): QueryScanState | null => resolveQueryScan(response, responseErrorObject, queryScanResult),
+        ],
     })),
     listeners(({ actions, values, cache, props }) => ({
         abortAnyRunningQuery: () => {
@@ -2014,9 +2076,34 @@ export const dataNodeLogic = kea<dataNodeLogicType>([
             if ('query' in props.query) {
                 cache.localResults[JSON.stringify(props.query.query)] = response
             }
+            actions.pollQueryScan()
         },
         loadDataFailure: () => {
             actions.collectionNodeLoadDataFailure(props.key)
+            actions.pollQueryScan()
+        },
+        pollQueryScan: async (_, breakpoint) => {
+            // The scan is written by a job that starts with the run, so a response can arrive
+            // before the findings exist. Ask for them twice, then leave them to the next run.
+            const cacheKey = values.queryScan?.cacheKey
+            if (!cacheKey || values.queryScan?.summary.status !== 'pending') {
+                return
+            }
+            for (const delayMs of QUERY_SCAN_POLL_DELAYS_MS) {
+                await breakpoint(delayMs)
+                let scan: QueryScanApiResponse
+                try {
+                    scan = await api.queryScan.get(cacheKey)
+                } catch {
+                    // The analysis is advice, so a missing or failed scan leaves the run's numbers as they are.
+                    return
+                }
+                breakpoint()
+                if (scan.status === 'done') {
+                    actions.setQueryScanResult(scan)
+                    return
+                }
+            }
         },
         loadNewDataSuccess: ({ response }) => {
             props.onData?.(response as Record<string, unknown> | null | undefined)

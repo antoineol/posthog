@@ -155,6 +155,32 @@ describe('uiCustomizationLogic', () => {
         })
     })
 
+    it('shows query scan advice unless it is explicitly hidden, whatever the customization flag says', () => {
+        // The toggle ships with the query scan, not with sidebar customization, so the flag must
+        // not gate it.
+        featureFlagLogic.actions.setFeatureFlags([], {})
+        seedUser(null)
+        expect(logic.values.showQueryScanAdvice).toBe(true)
+
+        seedUser({ version: 1, hide_query_scan_advice: true })
+        expect(logic.values.showQueryScanAdvice).toBe(false)
+    })
+
+    it('persists the complete configuration when the advice toggle changes', async () => {
+        seedUser({ version: 1, sidebar: { density: 'compact' } })
+
+        await expectLogic(logic, () => {
+            logic.actions.setQueryScanAdviceShown(false)
+        }).toFinishAllListeners()
+
+        expect(logic.values.showQueryScanAdvice).toBe(false)
+        expect(patchedUser?.ui_configuration).toEqual({
+            version: 1,
+            sidebar: { density: 'compact' },
+            hide_query_scan_advice: true,
+        })
+    })
+
     it('withSidebarPatch merges density into configuration', () => {
         expect(withSidebarPatch(null, { density: 'compact' })).toEqual({
             version: 1,

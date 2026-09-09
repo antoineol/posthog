@@ -785,10 +785,12 @@ export interface sqlEditorLogicActions {
     fixErrors: (
         query: string,
         error?: string | undefined,
-        connectionId?: string | undefined
+        connectionId?: string | undefined,
+        instruction?: string | undefined
     ) => {
         connectionId: string | undefined
         error: string | undefined
+        instruction: string | undefined
         query: string
     } // fixSQLErrorsLogic
     fixErrorsFailure: (
@@ -804,6 +806,7 @@ export interface sqlEditorLogicActions {
             | {
                   connectionId: string | undefined
                   error: string | undefined
+                  instruction: string | undefined
                   query: string
               }
             | undefined
@@ -811,6 +814,7 @@ export interface sqlEditorLogicActions {
         payload?: {
             connectionId: string | undefined
             error: string | undefined
+            instruction: string | undefined
             query: string
         }
         response: Response
