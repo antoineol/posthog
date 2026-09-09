@@ -2284,6 +2284,7 @@ _PROTECTED_RUN_STATE_KEYS = frozenset(
         "rtk_effective",
         "benjamin_effective",
         "usage_metrics_recorded",
+        "signal_handoff_key",
     }
 )
 
