@@ -57,7 +57,7 @@ from ee.hogai.utils.query import validate_assistant_query
 
 _SCAN_FINDING = QueryScanWarning(
     kind=QueryScanFindingKind.NO_EVENT_FILTER,
-    message="This query read every event in its date range: 4.2 billion rows in 12.3 s.",
+    message="This query has no event filter, so it reads every event.",
     fix="Add an event filter naming the events this question is about. Change nothing else.",
     rows_read=4_200_000_000,
     duration_ms=12_300,
@@ -327,7 +327,7 @@ class TestAssistantQueryExecutor(NonAtomicBaseTest):
         self.assertIn(failure_text, message)
         self.assertLess(message.index(failure_text), message.index("<query_scan_warning>"))
         self.assertIn("ClickHouse stopped this query after 12.3 s", message)
-        self.assertIn("- This query read every event in its date range", message)
+        self.assertIn("- This query has no event filter, so it reads every event.", message)
         # The agent reads the summary, not the message, and the summary is capped.
         self.assertIn(failure_text, context.exception.to_summary())
 
@@ -374,7 +374,7 @@ class TestAssistantQueryExecutor(NonAtomicBaseTest):
         )
 
         self.assertIn("This query read 4.2 billion rows in 12.3 s, far more than it needs.", result)
-        self.assertIn("- This query read every event in its date range", result)
+        self.assertIn("- This query has no event filter, so it reads every event.", result)
 
     @patch("ee.hogai.context.insight.query_executor.process_query_dict")
     async def test_run_and_format_query_handles_generic_exception(self, mock_process_query):

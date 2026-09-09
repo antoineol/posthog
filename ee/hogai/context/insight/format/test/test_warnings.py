@@ -17,8 +17,7 @@ _SCAN_FINDING = {
     "reason": "in_or",
     "message": (
         "This query has an event filter, but it is inside an OR with another condition, so ClickHouse "
-        "could not use it. It read 4.2 billion rows in 12.3 s. Put the event filter outside the OR: "
-        "`WHERE event IN ('…') AND (… OR …)`."
+        "could not use it. Put the event filter outside the OR: `WHERE event IN ('…') AND (… OR …)`."
     ),
     "fix": "Move the event filter out of the OR so it stands on its own. Change nothing else.",
     "rows_read": 4_200_000_000,
@@ -89,8 +88,8 @@ def test_query_scan_block_carries_the_finding_and_the_standing_instruction():
         "<query_scan_warning>\n"
         "This query read 4.2 billion rows in 12.3 s, far more than it needs.\n"
         "- This query has an event filter, but it is inside an OR with another condition, so "
-        "ClickHouse could not use it. It read 4.2 billion rows in 12.3 s. Put the event filter "
-        "outside the OR: `WHERE event IN ('…') AND (… OR …)`.\n"
+        "ClickHouse could not use it. Put the event filter outside the OR: "
+        "`WHERE event IN ('…') AND (… OR …)`.\n"
         "Before running it again: tell the user which filter is missing, propose a specific change "
         "that keeps the question the same, and ask them to confirm. Do not narrow the query without "
         "saying so.\n"
@@ -114,17 +113,6 @@ def test_compact_query_scan_block_carries_two_findings():
     assert "- finding 0" in block
     assert "- finding 1" in block
     assert "- finding 2" not in block
-
-
-def test_query_scan_block_leads_with_the_numbers_the_findings_were_written_from():
-    # A cached body carries the numbers of the run that filled it, while the findings quote the
-    # run that was analyzed. Leading with the response's numbers makes the lead contradict its
-    # own bullets.
-    response = {"query_scan": _scan(rows_read=1_000, duration_ms=1_100), "warnings": [_SCAN_FINDING]}
-
-    block = format_query_scan_warnings(response)
-
-    assert block.splitlines()[1] == "This query read 4.2 billion rows in 12.3 s, far more than it needs."
 
 
 @pytest.mark.parametrize(
@@ -184,7 +172,7 @@ def test_query_scan_block_keeps_the_comparison_operator_in_the_advice():
     # would propose an equality test that matches almost nothing.
     finding = build_warning(
         kind=FindingKind.NO_START_DATE,
-        measurements=ScanMeasurements(rows_read=4_200_000_000, duration_ms=12_300, days=900),
+        measurements=ScanMeasurements(rows_read=4_200_000_000, duration_ms=12_300),
     ).model_dump(mode="json")
 
     block = format_query_scan_warnings({"query_scan": _SCAN_SHOWN, "warnings": [finding]})

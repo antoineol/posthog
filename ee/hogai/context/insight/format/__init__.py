@@ -168,7 +168,7 @@ def format_query_scan_warnings(response: dict[str, Any], team: "Team | None" = N
     return "\n".join(
         [
             f"<{QUERY_SCAN_WARNING_TAG}>",
-            lead.format(**_analyzed_numbers(findings[0], numbers)),
+            lead.format(**numbers),
             *(f"- {message}" for message in messages),
             _QUERY_SCAN_INSTRUCTION,
             f"</{QUERY_SCAN_WARNING_TAG}>",
@@ -176,20 +176,6 @@ def format_query_scan_warnings(response: dict[str, Any], team: "Team | None" = N
             "",
         ]
     )
-
-
-def _analyzed_numbers(finding: dict[str, Any], fallback: dict[str, str]) -> dict[str, str]:
-    """The numbers the findings were written from.
-
-    Every finding of one analysis quotes the run that analysis measured, and that run can be an
-    earlier one than the response we are decorating. Taking the lead from the same run keeps it
-    from contradicting the bullets under it.
-    """
-    rows_read = finding.get("rows_read")
-    duration_ms = finding.get("duration_ms")
-    if not isinstance(rows_read, int) or not isinstance(duration_ms, int):
-        return fallback
-    return {"rows": format_rows(rows_read), "secs": format_seconds(duration_ms)}
 
 
 def _format_pending_query_scan(
