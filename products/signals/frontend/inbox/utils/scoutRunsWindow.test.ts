@@ -157,7 +157,8 @@ describe('scoutRunsWindow report channel', () => {
                     skill_name: skill,
                     status: 'queued',
                     created_at: '2026-06-27T20:00:00Z',
-                    started_at: null,
+                    // A row stranded before the worker reached it never gets a start stamp.
+                    started_at: undefined,
                     completed_at: null,
                 }),
             ])
@@ -171,7 +172,7 @@ describe('scoutRunsWindow report channel', () => {
                     skill_name: skill,
                     status: 'queued',
                     created_at: '2026-06-27T21:59:30Z',
-                    started_at: null,
+                    started_at: undefined,
                     completed_at: null,
                 }),
             ])
