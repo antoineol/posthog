@@ -238,7 +238,9 @@ class TestAssistantQueryExecutor(NonAtomicBaseTest):
     @patch("ee.hogai.context.insight.query_executor.process_query_dict")
     async def test_paths_v2_query_degrades_to_json_fallback(self, mock_process_query: Mock, mock_capture: Mock) -> None:
         # The assistant has no PathsV2Query formatter yet, so a journeys insight must degrade to
-        # the raw-JSON fallback instead of erroring.
+        # the raw-JSON fallback instead of erroring. The scan block still goes above that fallback,
+        # because a journeys insight is analyzed like any other and the advice would otherwise be
+        # lost for every query kind that has no formatter.
         results = {
             "steps": [
                 {
@@ -251,12 +253,18 @@ class TestAssistantQueryExecutor(NonAtomicBaseTest):
             "edges": [],
             "prefixes": [],
         }
-        mock_process_query.return_value = {"results": results}
+        mock_process_query.return_value = {
+            "results": results,
+            "query_scan": {"mode": "show", "rows_read": 4_200_000_000, "duration_ms": 12_300, "status": "done"},
+            "warnings": [_SCAN_FINDING.model_dump(by_alias=True, exclude_none=True)],
+        }
 
         result = await execute_and_format_query(self.team, PathsV2Query(pathsV2Filter=PathsV2Filter()), user=self.user)
 
         self.assertIn("stepIndex", result)
         self.assertIn("/home", result)
+        self.assertIn("<query_scan_warning>", result)
+        self.assertLess(result.index("<query_scan_warning>"), result.index("stepIndex"))
         mock_capture.assert_not_called()
 
     @patch("ee.hogai.context.insight.query_executor.process_query_dict")
