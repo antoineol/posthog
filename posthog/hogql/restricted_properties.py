@@ -7,6 +7,7 @@ from posthog.hogql.database.schema.events import EventsGroupSubTable, EventsPers
 from posthog.hogql.database.schema.groups import GroupsTable, RawGroupsTable
 from posthog.hogql.database.schema.persons import PersonsTable, RawPersonsTable
 
+from posthog.clickhouse.events_json import UNPARSEABLE_PROPERTIES_KEY
 from posthog.constants import GROUP_TYPES_LIMIT
 
 logger = structlog.get_logger(__name__)
@@ -75,7 +76,7 @@ def restricted_property_keys_for_table_type(
         # blob-key drop.
         return set()
 
-    return {
+    restricted_keys = {
         restriction.name
         for restriction in context.restricted_properties
         if restriction.property_type == prop_def_type
@@ -85,3 +86,7 @@ def restricted_property_keys_for_table_type(
             or restriction.group_type_index == group_type_index
         )
     }
+    if restricted_keys and context.uses_new_events_schema() and isinstance(table, (EventsTable, EventsPersonSubTable)):
+        # Quarantine contains raw property values inside a string, beyond JSONDropKeys' reach.
+        restricted_keys.add(UNPARSEABLE_PROPERTIES_KEY)
+    return restricted_keys

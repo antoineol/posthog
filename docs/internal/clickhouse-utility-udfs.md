@@ -65,6 +65,10 @@ Documents exceeding the shared depth limit produce `{}` in the temporary output;
 
 The native events ingestion view writes `temporary_properties` from the original event JSON and sets `inserted_at` when inserting. The storage column expires with `TTL toDateTime(inserted_at) + INTERVAL 60 DAY`; historical events receive the same retention window. Backfills set a fresh insertion time and run both cleaners without event-age checks. TTL merges clear the temporary column while retaining the event row.
 
-These schema changes apply retroactively through migration `0289_events_json_schema`, which uses the current schema helpers. No additional migration recreates existing tables.
+Migration `0289_events_json_schema` uses these helpers when initializing a fresh installation. It does not upgrade existing tables when the migration has already run. Keep native event reads disabled on an existing installation until its storage, distributed, Kafka, and materialized-view schemas match these definitions and the feature-flag compatibility layer is deployed. Cloud schema rollout is managed separately; these helpers do not deploy it.
 
 The native storage schema keeps parsing failures inside each JSON column under `$unparseable_properties`; it stores no separate quarantine or active-feature-flags columns. The ingestion view writes the cleaner outputs directly. Session and group compatibility aliases are computed on the distributed read table. Storage timestamps use `GCD` and Kafka metadata and event sizes use `T64`; distributed tables omit storage codecs.
+
+When any event or person property is access-restricted, HogQL also hides that property's class of quarantine diagnostics. This applies to whole-property reads, direct `$unparseable_properties` reads, and JSON extraction, because the diagnostic string can contain a copy of a restricted value. Readers without restrictions retain diagnostic access.
+
+Property removal is not a supported service. Native JSON events do not support property rewriting; retained temporary properties and quarantine diagnostics are not covered by the legacy property-removal machinery. Person, event, and team deletion still remove complete rows, including those retained columns.

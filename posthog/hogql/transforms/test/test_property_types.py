@@ -164,6 +164,42 @@ class TestNewEventsSchemaPropertySubcolumns(SimpleTestCase):
         assert "JSONExtract" not in printed, printed
         assert "toJSONString(events.properties.`$exception_types`)" not in printed, printed
 
+    @parameterized.expand(
+        [
+            ("event_direct", "properties.$unparseable_properties", PropertyDefinition.Type.EVENT, False),
+            (
+                "event_extract",
+                "JSONExtractString(properties, '$unparseable_properties')",
+                PropertyDefinition.Type.EVENT,
+                False,
+            ),
+            ("event_blob", "properties", PropertyDefinition.Type.EVENT, True),
+            ("event_serialized", "toJSONString(properties)", PropertyDefinition.Type.EVENT, True),
+            ("person_direct", "poe.properties.$unparseable_properties", PropertyDefinition.Type.PERSON, False),
+            ("person_blob", "poe.properties", PropertyDefinition.Type.PERSON, True),
+        ]
+    )
+    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
+    def test_quarantine_cannot_bypass_property_restrictions(
+        self, _name: str, expression: str, property_type: int, blob: bool
+    ) -> None:
+        context = self._context()
+        context.restricted_properties = {RestrictedProperty(name="secret", property_type=property_type)}
+        with patch("posthog.hogql.printer.utils.build_property_swapper"):
+            printed, _ = prepare_and_print_ast(parse_select(f"SELECT {expression} FROM events"), context, "clickhouse")
+
+        if blob:
+            assert any(
+                isinstance(value, list) and "$unparseable_properties" in value for value in context.values.values()
+            ), printed
+        else:
+            assert "events.properties" not in printed, printed
+            assert "events.person_properties" not in printed, printed
+
+        unrestricted = self._print_select(f"SELECT {expression} FROM events")
+        assert "JSONDropKeys" not in unrestricted, unrestricted
+        assert "events.properties" in unrestricted or "events.person_properties" in unrestricted, unrestricted
+
 
 class TestPropertyTypes(BaseTest):
     snapshot: Any
