@@ -80,13 +80,13 @@ def get(team_id: int, cache_key: str, *, thresholds: str | None = None) -> Query
         return None
 
 
-def set_pending(team_id: int, cache_key: str) -> None:
-    _write(
-        team_id,
-        cache_key,
-        {"status": "pending", "enqueued_at": _now()},
-        PENDING_TTL_SECONDS,
-    )
+def set_pending(team_id: int, cache_key: str, *, killed: bool = False) -> None:
+    value: dict[str, Any] = {"status": "pending", "enqueued_at": _now()}
+    if killed:
+        # The scan endpoint answers from this slot until the job finishes and reports the field
+        # straight, so a run ClickHouse stopped must not read as one that completed.
+        value["killed"] = True
+    _write(team_id, cache_key, value, PENDING_TTL_SECONDS)
 
 
 def set_done(team_id: int, cache_key: str, slot: QueryScanSlot) -> None:

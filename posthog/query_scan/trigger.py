@@ -85,7 +85,7 @@ def maybe_trigger_query_scan(
     # module-level import here would close that cycle.
     from posthog.tasks.query_scan import analyze_query_scan  # noqa: PLC0415
 
-    set_pending(team_id, cache_key)
+    set_pending(team_id, cache_key, killed=killed)
     analyze_query_scan.delay(
         team_id=team_id,
         cache_key=cache_key,

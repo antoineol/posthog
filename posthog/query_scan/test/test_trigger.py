@@ -75,6 +75,14 @@ class TestQueryScanTrigger(SimpleTestCase):
         self.delay.assert_not_called()
         self.redis.set.assert_not_called()
 
+    def test_a_killed_run_records_that_on_the_pending_slot(self) -> None:
+        # The scan endpoint answers from this slot until the job finishes, so a stopped run that
+        # left no `killed` here would be reported as one that ran to completion.
+        self._trigger(killed=True)
+
+        _key, payload = self.redis.set.call_args.args
+        assert json.loads(payload)["killed"] is True
+
     def test_a_slot_from_other_thresholds_does_not_stop_a_new_scan(self) -> None:
         # The ratios decide whether a finding exists, so a payload change has to re-analyze
         # instead of leaving the old findings in place until the slot expires.
