@@ -213,6 +213,12 @@ class AssistantQueryExecutor:
                 if debug_timing:
                     logger.warning(f"{TIMING_LOG_PREFIX} aexecute_query completed in {execute_elapsed:.3f}s")
 
+            # The wait belongs to the path that renders the findings. A caller that takes the raw
+            # response reads neither `query_scan` nor `warnings`, so waiting there would cost the
+            # person up to five seconds of their reply for output that cannot change.
+            if isinstance(response_dict, dict):
+                await self._await_query_scan(response_dict)
+
             try:
                 # Attempt to format results using query-specific formatters
                 format_start = time.time()
@@ -500,9 +506,6 @@ class AssistantQueryExecutor:
         # `query_status.error` check the async-polling branch above already does.
         if isinstance(response_dict, dict) and (error := response_dict.get("error")):
             raise MaxToolRetryableError(str(error))
-
-        if isinstance(response_dict, dict):
-            await self._await_query_scan(response_dict)
 
         total_elapsed = time.time() - start_time
         if debug_timing:
