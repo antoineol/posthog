@@ -166,9 +166,9 @@ _timestamp,
 _offset,
 _partition,
 arrayMap(
-    i -> _headers.value[i],
+    i -> (_headers.value[i]),
     arrayFilter(
-        i -> _headers.name[i] = 'kafka-consumer-breadcrumbs',
+        i -> ((_headers.name[i]) = 'kafka-consumer-breadcrumbs'),
         arrayEnumerate(_headers.name)
     )
 ) as consumer_breadcrumbs
