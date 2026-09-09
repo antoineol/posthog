@@ -72,7 +72,7 @@ export const FixHogqlCreateBody = /* @__PURE__ */ zod.object({
         .string()
         .default(fixHogqlCreateBodyInstructionDefault)
         .describe(
-            'A change to apply to the query, such as adding an event filter. Used only when `error` is empty. The tool keeps the question the query answers the same.'
+            'The changes to apply to the query, such as adding an event filter. Several changes go in one numbered list. Used only when `error` is empty. The tool keeps the question the query answers the same, and returns the query unchanged when no change would.'
         ),
 })
 
