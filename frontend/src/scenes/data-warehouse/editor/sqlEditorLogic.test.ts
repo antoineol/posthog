@@ -32,6 +32,7 @@ import { BI_EDITOR_EVENTS } from './bi/biEditorAnalytics'
 import { biEditorLogic } from './bi/biEditorLogic'
 import { BIConfig, BIEditorView, BIField } from './bi/biEditorTypes'
 import { buildSqlNotebook, editorSceneLogic } from './editorSceneLogic'
+import { fixSQLErrorsLogic } from './fixSQLErrorsLogic'
 import { OutputTab } from './outputPaneLogic'
 import {
     activeTabMatchesUrlTarget,
@@ -2697,6 +2698,39 @@ describe('sqlEditorLogic', () => {
             act()
 
             expect(model.pushEditOperations).not.toHaveBeenCalled()
+        })
+    })
+
+    describe('AI fixer telemetry', () => {
+        // One action serves the error fixer and the query scan's advice. Without a mode on the
+        // outcome events the two features share one success and failure count, and conflated
+        // events cannot be separated afterwards.
+        const TRACE_ID = 'trace-1'
+        const INSTRUCTION = 'Add an event filter naming the events this question is about.'
+
+        it.each([
+            { name: 'an error fix that succeeds', instruction: undefined, mode: 'error', ok: true },
+            { name: 'a query scan fix that succeeds', instruction: INSTRUCTION, mode: 'query_scan', ok: true },
+            { name: 'an error fix that fails', instruction: undefined, mode: 'error', ok: false },
+            { name: 'a query scan fix that fails', instruction: INSTRUCTION, mode: 'query_scan', ok: false },
+        ])('names the mode on the outcome event for $name', async ({ instruction, mode, ok }) => {
+            useMocks({
+                post: {
+                    '/api/environments/:team_id/fix_hogql': () =>
+                        ok ? [200, { query: 'SELECT 2', trace_id: TRACE_ID }] : [500, {}],
+                },
+            })
+            logic = sqlEditorLogic({ tabId: TAB_ID, monaco: createMockMonaco(), editor: createMockEditor() })
+            logic.mount()
+            ;(posthog.capture as jest.Mock).mockClear()
+
+            fixSQLErrorsLogic.actions.fixErrors('SELECT 1', instruction ? undefined : 'boom', undefined, instruction)
+            await expectLogic(fixSQLErrorsLogic).toDispatchActions([ok ? 'fixErrorsSuccess' : 'fixErrorsFailure'])
+
+            expect(posthog.capture).toHaveBeenCalledWith(
+                ok ? 'ai-error-fixer-success' : 'ai-error-fixer-failure',
+                ok ? { trace_id: TRACE_ID, mode } : { mode }
+            )
         })
     })
 
