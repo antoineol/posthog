@@ -1,3 +1,4 @@
+import json
 import time
 import threading
 from datetime import UTC, datetime, timedelta
@@ -333,6 +334,44 @@ class TestQueryRunner(BaseTest):
         assert delay.call_args.kwargs["killed"] is True
         assert delay.call_args.kwargs["error_type"] == "ClickHouseQueryMemoryLimitExceeded"
         assert getattr(raised.exception, "cache_key", None) == runner.get_cache_key()
+        assert getattr(raised.exception, "query_scan", None) == {
+            "mode": "show",
+            "rows_read": 90,
+            "duration_ms": 4000,
+            "killed": True,
+            "status": "pending",
+        }
+
+    def test_a_killed_run_reports_the_status_of_a_scan_another_run_owns(self):
+        # A retry of a killed query has the same cache key, so the second kill finds the first
+        # one's analysis still running. Reporting that status is what keeps the reply consistent:
+        # without it the second kill carries no scan block while the first one did.
+        TestQueryRunner = self.setup_test_query_runner_class()
+
+        def calculate_until_clickhouse_gives_up(_self):
+            record(rows_read=90, bytes_read=900, duration_ms=4000.0)
+            raise ClickHouseQueryMemoryLimitExceeded()
+
+        redis_client = mock.Mock()
+        redis_client.get.return_value = json.dumps({"version": 1, "status": "pending"})
+        redis_client.incr.return_value = 1
+        runner = TestQueryRunner(query={"some_attr": "bla"}, team=self.team)
+        with (
+            mock.patch(
+                "posthog.hogql_queries.query_runner.get_query_scan_flag",
+                return_value=QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5),
+            ),
+            mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=redis_client),
+            mock.patch("posthog.tasks.query_scan.analyze_query_scan.delay") as delay,
+            mock.patch.object(
+                TestQueryRunner, "_calculate", autospec=True, side_effect=calculate_until_clickhouse_gives_up
+            ),
+            self.assertRaises(ClickHouseQueryMemoryLimitExceeded) as raised,
+        ):
+            runner.run(execution_mode=ExecutionMode.CALCULATE_BLOCKING_ALWAYS, user=self.user)
+
+        # The slot is already claimed, so no second job, but the status still reaches the error.
+        delay.assert_not_called()
         assert getattr(raised.exception, "query_scan", None) == {
             "mode": "show",
             "rows_read": 90,
