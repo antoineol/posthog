@@ -339,6 +339,26 @@ class TestAssistantQueryExecutor(NonAtomicBaseTest):
         # The agent reads the summary, not the message, and the summary is capped.
         self.assertIn(failure_text, context.exception.to_summary())
 
+    @patch("ee.hogai.context.insight.query_executor.get_query_scan_flag", return_value=_SCAN_FLAG)
+    @patch("ee.hogai.context.insight.query_executor.get_query_scan_slot")
+    @patch("ee.hogai.context.insight.query_executor.process_query_dict")
+    async def test_run_and_format_query_does_not_wait_when_no_analysis_was_enqueued(
+        self, mock_process_query, mock_get_slot, _mock_flag
+    ):
+        # ClickHouse rejects a query it estimates as too long before it runs, so the run lands
+        # under the floor and nothing is enqueued. No analysis can arrive, so waiting would only
+        # hold back the error the agent has to act on.
+        error = ExposedCHQueryError(_KILLED_RUN_ERROR)
+        error.query_scan = {"mode": "show", "rows_read": 90, "duration_ms": 400, "killed": True}
+        error.cache_key = "cache_abc"
+        mock_process_query.side_effect = error
+
+        with self.assertRaises(MaxToolRetryableError) as context:
+            await self.query_runner.arun_and_format_query(AssistantTrendsQuery(series=[]))
+
+        mock_get_slot.assert_not_called()
+        self.assertNotIn("<query_scan_warning>", str(context.exception))
+
     @patch("ee.hogai.context.insight.query_executor.get_query_scan_flag", return_value=None)
     @patch("ee.hogai.context.insight.query_executor.get_query_scan_slot")
     @patch("ee.hogai.context.insight.query_executor.process_query_dict")
