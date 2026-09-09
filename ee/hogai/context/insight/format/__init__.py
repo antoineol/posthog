@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -53,12 +54,17 @@ def get_boxplot_results(response: dict[str, Any]) -> list[Any]:
 
 
 # A warning message can carry names the project's own event data supplies, and anyone capturing
-# events controls those. The message goes verbatim into agent context, so strip control characters,
-# newlines AND angle brackets — the latter stops a crafted name (for example one containing
-# `</taxonomy_warnings>`) from closing the wrapper early and breaking out of the delimited block —
-# and cap length. This can't stop plain-text influence (no escaping can), but it keeps the names
-# contained as data inside the labeled block.
-_UNSAFE_WARNING_CHARS = re.compile(r"[\x00-\x1f\x7f<>]")
+# events controls those. The message goes verbatim into agent context, so strip control characters
+# and newlines, and cap length. This can't stop plain-text influence (no escaping can), but it keeps
+# the names contained as data inside the labeled block.
+_UNSAFE_WARNING_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+# Dropping every angle bracket stops a crafted name (for example one containing
+# `</taxonomy_warnings>`) from closing the wrapper early and breaking out of the delimited block.
+_ANGLE_BRACKETS = re.compile(r"[<>]")
+# A line PostHog composes itself carries no project data but does carry comparison operators, so
+# take out only the shapes that could close a wrapper. Repeat until nothing changes, so a nested
+# `<</tag>/tag>` cannot reassemble into a tag after one pass.
+_WRAPPER_TAG = re.compile(r"<\s*/?\s*[A-Za-z][\w.:-]*\s*/?\s*>")
 _MAX_WARNING_CHARS = 300
 
 QUERY_SCAN_WARNING_TAG = "query_scan_warning"
@@ -75,14 +81,33 @@ _QUERY_SCAN_SHORT_FORM = (
 )
 
 
-def sanitize_warning_line(message: str) -> str:
-    cleaned = re.sub(r"\s+", " ", _UNSAFE_WARNING_CHARS.sub(" ", message)).strip()
+def _collapse_warning_line(message: str) -> str:
+    cleaned = re.sub(r"\s+", " ", message).strip()
     return cleaned[:_MAX_WARNING_CHARS] + "…" if len(cleaned) > _MAX_WARNING_CHARS else cleaned
 
 
-def _warning_messages(response: dict[str, Any], warning_type: str) -> list[str]:
+def sanitize_warning_line(message: str) -> str:
+    """For a line built from project data, where no angle bracket is worth keeping."""
+    return _collapse_warning_line(_ANGLE_BRACKETS.sub(" ", _UNSAFE_WARNING_CHARS.sub(" ", message)))
+
+
+def sanitize_composed_warning_line(message: str) -> str:
+    """For a line PostHog composes itself, where `timestamp >= now() - interval 30 day` has to reach
+    the agent as written. Stripping the bracket would turn that advice into an equality test, so the
+    agent would propose a predicate matching almost nothing."""
+    cleaned = _UNSAFE_WARNING_CHARS.sub(" ", message)
+    while (without_tags := _WRAPPER_TAG.sub(" ", cleaned)) != cleaned:
+        cleaned = without_tags
+    return _collapse_warning_line(cleaned)
+
+
+def _warning_messages(
+    response: dict[str, Any],
+    warning_type: str,
+    sanitize: Callable[[str], str] = sanitize_warning_line,
+) -> list[str]:
     return [
-        sanitize_warning_line(w["message"])
+        sanitize(w["message"])
         for w in (response.get("warnings") or [])
         if w.get("type") == warning_type and w.get("message")
     ]
@@ -127,7 +152,7 @@ def format_query_scan_warnings(response: dict[str, Any], team: "Team | None" = N
         return ""
 
     numbers = {"rows": format_rows(rows_read), "secs": format_seconds(duration_ms)}
-    messages = _warning_messages(response, "query_scan")
+    messages = _warning_messages(response, "query_scan", sanitize_composed_warning_line)
     if not messages:
         return _format_pending_query_scan(scan, numbers, duration_ms, team)
 
@@ -230,5 +255,6 @@ __all__ = [
     "format_query_results_for_llm",
     "format_query_scan_warnings",
     "format_warehouse_sync_warnings",
+    "sanitize_composed_warning_line",
     "sanitize_warning_line",
 ]
