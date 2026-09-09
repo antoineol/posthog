@@ -12,11 +12,11 @@ A report is a **living document**: every piece of work done on it — judgments,
 
 ## Temporal Workflows
 
-The `signals-stage-handoffs-v1` patch keeps promoted signals and arrivals during active research in S3 until their processing finishes.
-Research reads these handoffs alongside older ClickHouse signals; an implementation finalizer waits for task completion before publishing the triggering signal.
-Temporal carries the in-flight keys across workflow runs, without a pending-signal database table.
+Grouping always publishes every signal through the embedding worker and confirms the batch in ClickHouse before starting research or the next batch.
+The `signals-stage-handoffs-v1` patch also carries signal data and accumulated costs through S3 between processing stages.
+Research or implementation can re-emit the same signal with updated costs, without blocking later grouping batches.
+Grouping uses its existing batch context and ClickHouse; it does not search pending S3 handoffs.
 See [Signal processing costs](../../docs/internal/signals-costs.md) for pricing, handoff ownership, and replay compatibility.
-The pre-handoff publication order described below remains the replay path for older histories.
 
 Signals ingestion uses a three-stage pipeline: **emitter → buffer → grouping v2**. The emitter and buffer workflows are defined in `backend/temporal/emitter.py` and `backend/temporal/buffer.py`. The grouping v2 workflow is in `backend/temporal/grouping_v2.py` and delegates to the shared `_process_signal_batch()` implementation in `backend/temporal/grouping.py`. The report summary workflow is defined in `backend/temporal/summary.py`.
 

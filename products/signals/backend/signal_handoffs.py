@@ -26,8 +26,7 @@ if TYPE_CHECKING:
 class SignalHandoff:
     team_id: int
     signal: SignalData
-    embedding: list[float]
-    published: bool = False
+    finalized: bool = False
     costed_tasks: list[str] = field(default_factory=list)
 
 
@@ -65,8 +64,8 @@ async def read_handoff(key: str, team_id: int) -> SignalHandoff:
     return SignalHandoff(
         team_id=team_id,
         signal=SignalData(**signal),
-        embedding=payload["embedding"],
-        published=payload.get("published", False),
+        # The legacy `published` marker also means final-stage completion, not grouping publication.
+        finalized=payload.get("finalized", payload.get("published", False)),
         costed_tasks=payload.get("costed_tasks", []),
     )
 
@@ -120,6 +119,6 @@ async def publish_signal(handoff: SignalHandoff) -> None:
 
 async def publish_handoff(key: str, team_id: int) -> None:
     handoff = await read_handoff(key, team_id)
-    if not handoff.published:
+    if not handoff.finalized:
         await publish_signal(handoff)
-        await write_handoff(replace(handoff, published=True))
+        await write_handoff(replace(handoff, finalized=True))

@@ -160,8 +160,7 @@ async def _process_signal(
     queries: list[str],
     augmented_results: list[list[SignalCandidate]],
     report_contexts: dict[str, ReportContext],
-    defer_emission: bool,
-    pending_signal_keys: list[str],
+    use_handoffs: bool,
     track_costs: bool,
 ) -> _SignalResult:
     """
@@ -197,9 +196,7 @@ async def _process_signal(
 
         group_signals_result: FetchSignalsForReportOutput = await workflow.execute_activity(
             fetch_signals_for_report_activity,
-            FetchSignalsForReportInput(
-                team_id=team_id, report_id=match_result.report_id, signal_keys=pending_signal_keys
-            ),
+            FetchSignalsForReportInput(team_id=team_id, report_id=match_result.report_id),
             start_to_close_timeout=timedelta(minutes=5),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
@@ -254,12 +251,11 @@ async def _process_signal(
             source_type=signal.source_type,
             source_id=signal.source_id,
             extra=signal.extra,
-            embedding=signal_embedding,
             match_result=match_result,
             updated_title=updated_title,
             remediation=signal.remediation,
             metadata=signal.metadata,
-            defer_emission=defer_emission,
+            use_handoffs=use_handoffs,
         ),
         start_to_close_timeout=timedelta(minutes=5),
         retry_policy=RetryPolicy(maximum_attempts=3),
@@ -283,8 +279,7 @@ async def _process_signal_safe(
     queries: list[str],
     augmented_results: list[list[SignalCandidate]],
     report_contexts: dict[str, ReportContext],
-    defer_emission: bool,
-    pending_signal_keys: list[str],
+    use_handoffs: bool,
     track_costs: bool,
 ) -> Optional[_SignalResult]:
     """Wrapper around _process_signal that catches exceptions and returns None on failure."""
@@ -298,8 +293,7 @@ async def _process_signal_safe(
             queries=queries,
             augmented_results=augmented_results,
             report_contexts=report_contexts,
-            defer_emission=defer_emission,
-            pending_signal_keys=pending_signal_keys,
+            use_handoffs=use_handoffs,
             track_costs=track_costs,
         )
     except Exception as e:
@@ -333,8 +327,7 @@ async def _process_parallel_batch(
     signal_embeddings: list[list[float]],
     processed_batch_signals: list[_ProcessedBatchSignal],
     report_contexts: dict[str, ReportContext],
-    defer_emission: bool,
-    pending_signal_keys: list[str],
+    use_handoffs: bool,
     track_costs: bool,
 ) -> ParallelBatchResult:
     """
@@ -353,7 +346,7 @@ async def _process_parallel_batch(
     coroutines = []
     for idx in batch_indices:
         signal = batch[idx]
-        signal_id = str(workflow.uuid4() if defer_emission else uuid.uuid4())
+        signal_id = str(workflow.uuid4() if use_handoffs else uuid.uuid4())
 
         # Augment CH candidates with all previously processed signals (from earlier batches)
         augmented_results = _augment_candidates_with_batch(
@@ -373,8 +366,7 @@ async def _process_parallel_batch(
                 queries=per_signal_queries[idx],
                 augmented_results=augmented_results,
                 report_contexts=report_contexts,
-                defer_emission=defer_emission,
-                pending_signal_keys=pending_signal_keys,
+                use_handoffs=use_handoffs,
                 track_costs=track_costs,
             )
         )
@@ -447,8 +439,7 @@ async def process_sequential_phase_parallel(
     per_signal_ch_results: list[list[list[SignalCandidate]]],
     signal_embeddings: list[list[float]],
     report_contexts: dict[str, ReportContext],
-    defer_emission: bool,
-    pending_signal_keys: list[str],
+    use_handoffs: bool,
     track_costs: bool,
 ) -> SequentialPhaseResult:
     """
@@ -499,8 +490,7 @@ async def process_sequential_phase_parallel(
             signal_embeddings=signal_embeddings,
             processed_batch_signals=all_processed_signals,
             report_contexts=report_contexts,
-            defer_emission=defer_emission,
-            pending_signal_keys=pending_signal_keys,
+            use_handoffs=use_handoffs,
             track_costs=track_costs,
         )
 

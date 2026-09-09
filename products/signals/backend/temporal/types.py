@@ -171,7 +171,6 @@ class TeamSignalGroupingV2Input:
     team_id: int
     pending_batch_keys: list[str] = field(default_factory=list)
     paused_until: Optional[datetime] = None
-    pending_signal_keys: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -198,7 +197,6 @@ class SignalReportSummaryWorkflowInputs:
     # than one run each. Defaults to 0 so histories written before this field replay unchanged.
     debounce_seconds: int = 0
     signal_keys: list[str] = field(default_factory=list)
-    context_signal_keys: list[str] = field(default_factory=list)
 
 
 @dataclass

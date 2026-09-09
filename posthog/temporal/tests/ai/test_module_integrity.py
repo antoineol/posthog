@@ -129,7 +129,6 @@ class TestSignalsProductModuleIntegrity:
             "dispatch_signal_handoffs_activity",
             "check_implementation_task_workflow_closed_activity",
             "finalize_signal_implementation_activity",
-            "release_signal_key_activity",
             "capture_signal_dropped_activity",
             "check_signals_quota_limited_activity",
             "delete_report_activity",

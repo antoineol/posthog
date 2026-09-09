@@ -37,7 +37,10 @@ from products.signals.backend.quota import (
 )
 from products.signals.backend.report_generation.research import ActionabilityChoice
 from products.signals.backend.report_generation.select_repo import RepoSelectionResult
-from products.signals.backend.signal_handoffs import read_handoff
+from products.signals.backend.signal_handoffs import (
+    read_handoff,
+    signal_key as signal_handoff_key,
+)
 from products.signals.backend.temporal import metrics
 from products.signals.backend.temporal.agentic.report import (
     RunAgenticReportInput,
@@ -81,15 +84,13 @@ FINALIZER_BATCH_SIZE = 20
 
 
 def select_research_signal_key(
+    team_id: int,
     signal_keys: list[str],
     fetch_result: FetchSignalsForReportOutput,
     pass_completed: bool,
     next_bucket: int | None,
 ) -> str | None:
-    signals_by_id = {signal.signal_id: signal for signal in fetch_result.signals}
-    signals_by_key = {
-        signal_key: signals_by_id.get(signal_id) for signal_id, signal_key in fetch_result.signal_key_by_id.items()
-    }
+    signals_by_key = {signal_handoff_key(team_id, signal.signal_id): signal for signal in fetch_result.signals}
     candidates = [(index, signal_key, signals_by_key.get(signal_key)) for index, signal_key in enumerate(signal_keys)]
 
     def assigned_count(candidate: tuple[int, str, SignalData | None]) -> int | None:
@@ -234,19 +235,15 @@ class SignalReportSummaryWorkflow:
     def __init__(self) -> None:
         self._pending_signal_keys: list[str] = []
         self._submitted_signal_keys: set[str] = set()
-        self._context_signal_keys: list[str] = []
         self._pass_completed = False
         self._next_research_bucket: int | None = None
 
     @temporalio.workflow.signal(name="submit_signal_keys")
-    async def submit_signal_keys(self, signal_keys: list[str], context_signal_keys: list[str] | None = None) -> None:
+    async def submit_signal_keys(self, signal_keys: list[str]) -> None:
         for signal_key in signal_keys:
             if signal_key not in self._submitted_signal_keys:
                 self._submitted_signal_keys.add(signal_key)
                 self._pending_signal_keys.append(signal_key)
-        for signal_key in [*signal_keys, *(context_signal_keys or [])]:
-            if signal_key not in self._context_signal_keys:
-                self._context_signal_keys.append(signal_key)
 
     @temporalio.workflow.run
     async def run(self, inputs: SignalReportSummaryWorkflowInputs) -> None:
@@ -261,7 +258,7 @@ class SignalReportSummaryWorkflow:
         # structlog renderer skips producing when team_id isn't in the event dict).
         log = logger.bind(team_id=inputs.team_id, report_id=inputs.report_id)
         if workflow.patched("signals-stage-handoffs-v1"):
-            await self.submit_signal_keys(inputs.signal_keys, inputs.context_signal_keys)
+            await self.submit_signal_keys(inputs.signal_keys)
         # Wait before researching so a burst of signals lands in one run. This workflow already holds
         # the report's workflow ID, so every signal arriving while it waits is swallowed by the
         # WorkflowAlreadyStartedError handler in grouping rather than spawning its own run, and the
@@ -304,13 +301,8 @@ class SignalReportSummaryWorkflow:
         self,
         inputs: SignalReportSummaryWorkflowInputs,
         log: FilteringBoundLogger,
-        signal_keys: list[str] | None = None,
     ) -> FetchSignalsForReportOutput:
-        fetch_input = FetchSignalsForReportInput(
-            team_id=inputs.team_id,
-            report_id=inputs.report_id,
-            signal_keys=signal_keys or [],
-        )
+        fetch_input = FetchSignalsForReportInput(team_id=inputs.team_id, report_id=inputs.report_id)
         fetch_result: FetchSignalsForReportOutput = await workflow.execute_activity(
             fetch_signals_for_report_activity,
             fetch_input,
@@ -440,8 +432,8 @@ class SignalReportSummaryWorkflow:
             await self._finalize_signal_keys(inputs, signal_keys, triggering_signal_key)
             return False
 
-        # 1. Fetch ClickHouse's prior report signals and the S3-backed arrivals in one stable view.
-        fetch_result = await self._fetch_signals(inputs, log, self._context_signal_keys if signal_keys else None)
+        # 1. Fetch the report's signals after grouping made them visible in ClickHouse.
+        fetch_result = await self._fetch_signals(inputs, log)
         if not fetch_result.signals:
             # patched(): same marker as the retry loop, so pre-patch histories replay straight to failure.
             if workflow.patched("signals-empty-fetch-retry") and await workflow.execute_activity(
@@ -474,6 +466,7 @@ class SignalReportSummaryWorkflow:
             return False
         if signal_keys:
             triggering_signal_key = select_research_signal_key(
+                inputs.team_id,
                 signal_keys,
                 fetch_result,
                 self._pass_completed,

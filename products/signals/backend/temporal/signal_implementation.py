@@ -1,6 +1,6 @@
 """Finalize a signal handoff after its implementation task settles."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from hashlib import sha256
 
 import temporalio
@@ -15,12 +15,6 @@ from posthog.temporal.common.scoped import scoped_temporal
 from posthog.temporal.common.utils import close_db_connections
 
 from products.signals.backend.signal_handoffs import add_task_cost, publish_handoff, read_handoff, write_handoff
-from products.signals.backend.temporal.signal_queries import (
-    WaitForClickHouseInput,
-    WaitForClickHouseMode,
-    WaitForClickHouseSignal,
-    wait_for_signal_in_clickhouse_activity,
-)
 from products.tasks.backend.facade import api as tasks_facade
 from products.tasks.backend.facade.billing import get_task_spend
 
@@ -32,13 +26,6 @@ class SignalImplementationInput:
     task_id: str | None = None
     run_id: str | None = None
     additional_signal_keys: tuple[str, ...] = ()
-
-
-@frozen
-class FinalizedSignal:
-    signal_id: str
-    timestamp: datetime
-    inserted_at: datetime | None = None
 
 
 def _signal_keys(input: SignalImplementationInput) -> tuple[str, ...]:
@@ -70,7 +57,7 @@ async def check_implementation_task_workflow_closed_activity(input: SignalImplem
 @temporalio.activity.defn
 @scoped_temporal()
 @close_db_connections
-async def finalize_signal_implementation_activity(input: SignalImplementationInput) -> list[FinalizedSignal]:
+async def finalize_signal_implementation_activity(input: SignalImplementationInput) -> None:
     if input.run_id:
         run = await database_sync_to_async(tasks_facade.get_task_run, thread_sensitive=False)(
             input.run_id, input.team_id
@@ -83,31 +70,8 @@ async def finalize_signal_implementation_activity(input: SignalImplementationInp
         add_task_cost(handoff, task_id, spend, "implementation")
         await write_handoff(handoff)
 
-    finalized_signals: list[FinalizedSignal] = []
     for signal_key in _signal_keys(input):
         await publish_handoff(signal_key, input.team_id)
-        handoff = await read_handoff(signal_key, input.team_id)
-        finalized_signals.append(
-            FinalizedSignal(
-                signal_id=handoff.signal.signal_id,
-                timestamp=handoff.signal.timestamp,
-                inserted_at=handoff.signal.inserted_at,
-            )
-        )
-    return finalized_signals
-
-
-@temporalio.activity.defn
-@scoped_temporal()
-async def release_signal_key_activity(input: SignalImplementationInput) -> None:
-    from products.signals.backend.temporal.grouping_v2 import (
-        TeamSignalGroupingV2Workflow,  # noqa: PLC0415 - avoids the activity registration cycle
-    )
-
-    client = await async_connect()
-    handle = client.get_workflow_handle(TeamSignalGroupingV2Workflow.workflow_id_for(input.team_id))
-    for signal_key in _signal_keys(input):
-        await handle.signal("release_signal_key", signal_key)
 
 
 @temporalio.workflow.defn(name="signal-implementation-finalizer")
@@ -130,36 +94,9 @@ class SignalImplementationFinalizerWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=3),
             ):
                 await workflow.sleep(timedelta(seconds=60))
-        finalized: list[FinalizedSignal] = await workflow.execute_activity(
+        await workflow.execute_activity(
             finalize_signal_implementation_activity,
             input,
             start_to_close_timeout=timedelta(minutes=5),
-            retry_policy=RetryPolicy(maximum_attempts=3),
-        )
-        await workflow.execute_activity(
-            wait_for_signal_in_clickhouse_activity,
-            WaitForClickHouseInput(
-                team_id=input.team_id,
-                signals=[
-                    WaitForClickHouseSignal(
-                        signal_id=signal.signal_id,
-                        timestamp=signal.timestamp,
-                        inserted_at=signal.inserted_at,
-                    )
-                    for signal in finalized
-                ],
-                mode=WaitForClickHouseMode.CH_CONFIRMED,
-                require_visible=True,
-            ),
-            # Headroom over the hour the activity polls for, so it can raise its own
-            # not-visible error instead of being cancelled one query short of it.
-            start_to_close_timeout=timedelta(hours=1, minutes=5),
-            heartbeat_timeout=timedelta(minutes=5),
-            retry_policy=RetryPolicy(maximum_attempts=3),
-        )
-        await workflow.execute_activity(
-            release_signal_key_activity,
-            input,
-            start_to_close_timeout=timedelta(minutes=1),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
