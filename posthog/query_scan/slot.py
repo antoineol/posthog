@@ -19,7 +19,7 @@ import structlog
 from posthog.schema import QueryScanRange, QueryScanStatus, QueryScanWarning
 
 from posthog.dataclasses import frozen
-from posthog.query_cache.storage import query_cache_raw_client, query_cache_read_client
+from posthog.query_cache.storage import query_cache_raw_client
 
 logger = structlog.get_logger(__name__)
 
@@ -55,7 +55,10 @@ def slot_key(team_id: int, cache_key: str) -> str:
 
 def get(team_id: int, cache_key: str) -> QueryScanSlot | None:
     try:
-        raw = query_cache_read_client().get(slot_key(team_id, cache_key))
+        # The primary, not the read replica the query cache reads through. The response that
+        # enqueues a scan reads the slot back in the same request, and the skip test that stops a
+        # second job reads what an earlier run wrote. A replica behind the write drops both.
+        raw = query_cache_raw_client().get(slot_key(team_id, cache_key))
         if raw is None:
             return None
         return _deserialize(json.loads(raw))

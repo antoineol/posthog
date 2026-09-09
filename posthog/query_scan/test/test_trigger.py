@@ -31,10 +31,9 @@ class TestQueryScanTrigger(SimpleTestCase):
         super().setUp()
         self.redis = mock.Mock()
         self.redis.get.return_value = None
-        for client in ("query_cache_read_client", "query_cache_raw_client"):
-            patcher = mock.patch(f"posthog.query_scan.slot.{client}", return_value=self.redis)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        patcher = mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=self.redis)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         delay_patcher = mock.patch("posthog.tasks.query_scan.analyze_query_scan.delay")
         self.delay = delay_patcher.start()
         self.addCleanup(delay_patcher.stop)

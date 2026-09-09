@@ -1330,7 +1330,7 @@ class TestQueryScan(APIBaseTest):
     def setUp(self):
         super().setUp()
         self.redis_client_mock = mock.Mock()
-        patcher = mock.patch("posthog.query_scan.slot.query_cache_read_client", return_value=self.redis_client_mock)
+        patcher = mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=self.redis_client_mock)
         patcher.start()
         self.addCleanup(patcher.stop)
 

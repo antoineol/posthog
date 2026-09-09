@@ -280,7 +280,6 @@ class TestQueryRunner(BaseTest):
                 "posthog.hogql_queries.query_runner.get_query_scan_flag",
                 return_value=QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5),
             ),
-            mock.patch("posthog.query_scan.slot.query_cache_read_client", return_value=redis_client),
             mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=redis_client),
             mock.patch("posthog.tasks.query_scan.analyze_query_scan.delay") as delay,
             mock.patch.object(

@@ -24,10 +24,9 @@ class TestQueryScanJob(BaseTest):
         redis = mock.Mock()
         redis.get.side_effect = lambda key: self.stored.get(key)
         redis.set.side_effect = lambda key, value, ex=None: self.stored.__setitem__(key, value)
-        for client in ("query_cache_read_client", "query_cache_raw_client"):
-            patcher = mock.patch(f"posthog.query_scan.slot.{client}", return_value=redis)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        patcher = mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=redis)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         flag_patcher = mock.patch("posthog.query_scan.job.get_query_scan_flag", return_value=FLAG)
         flag_patcher.start()
