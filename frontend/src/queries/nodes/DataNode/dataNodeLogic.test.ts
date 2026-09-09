@@ -845,6 +845,15 @@ describe('dataNodeLogic', () => {
             expect(logic.values.queryScan?.summary.status).toBe('done')
             expect(logic.values.queryScan?.summary.events_in_range).toBe(1000)
             expect(logic.values.queryScan?.findings).toHaveLength(1)
+
+            // A poll outlives the run that started it, so a result for another run must not
+            // decorate this response with numbers and advice measured somewhere else.
+            logic.actions.setQueryScanResult(
+                { status: 'done', warnings: [], events_in_range: 7, range: null, killed: false },
+                'another-cache-key'
+            )
+            expect(logic.values.queryScan?.summary.status).toBe('pending')
+            expect(logic.values.queryScan?.findings).toHaveLength(0)
         } finally {
             jest.useRealTimers()
         }

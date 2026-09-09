@@ -79,6 +79,9 @@ _QUERY_SCAN_SHORT_FORM = (
     "This query read {rows} rows in {secs} s. This is likely far more than needed; check the event "
     "filter and the start date before running it again."
 )
+# A killed run's block rides on an error message the agent framework caps at 500 characters, so it
+# carries the two findings most likely to explain the read and leaves the rest to the next run.
+_COMPACT_BLOCK_MESSAGES = 2
 
 
 def _collapse_warning_line(message: str) -> str:
@@ -101,16 +104,16 @@ def sanitize_composed_warning_line(message: str) -> str:
     return _collapse_warning_line(cleaned)
 
 
+def _warnings_of_type(response: dict[str, Any], warning_type: str) -> list[dict[str, Any]]:
+    return [w for w in (response.get("warnings") or []) if w.get("type") == warning_type and w.get("message")]
+
+
 def _warning_messages(
     response: dict[str, Any],
     warning_type: str,
     sanitize: Callable[[str], str] = sanitize_warning_line,
 ) -> list[str]:
-    return [
-        sanitize(w["message"])
-        for w in (response.get("warnings") or [])
-        if w.get("type") == warning_type and w.get("message")
-    ]
+    return [sanitize(w["message"]) for w in _warnings_of_type(response, warning_type)]
 
 
 def _format_warnings(response: dict[str, Any], warning_type: str, header: str) -> str:
@@ -136,12 +139,14 @@ def format_access_control_warnings(response: dict[str, Any]) -> str:
     return _format_warnings(response, "access_control", "[Access control]")
 
 
-def format_query_scan_warnings(response: dict[str, Any], team: "Team | None" = None) -> str:
+def format_query_scan_warnings(response: dict[str, Any], team: "Team | None" = None, *, compact: bool = False) -> str:
     """Tell the agent that this run read far more data than the question needs, and what to change.
 
     The block is the only channel to an outside MCP agent, so the standing instruction is inside it
     rather than only in the in-app assistant's prompt. `log_only` teams get nothing: the flag mode
     says what a client may show.
+
+    `compact` caps the findings, for the killed-run block that has to share a capped error message.
     """
     scan = response.get("query_scan")
     if not isinstance(scan, dict) or scan.get("mode") != "show":
@@ -152,15 +157,18 @@ def format_query_scan_warnings(response: dict[str, Any], team: "Team | None" = N
         return ""
 
     numbers = {"rows": format_rows(rows_read), "secs": format_seconds(duration_ms)}
-    messages = _warning_messages(response, "query_scan", sanitize_composed_warning_line)
-    if not messages:
+    findings = _warnings_of_type(response, "query_scan")
+    if not findings:
         return _format_pending_query_scan(scan, numbers, duration_ms, team)
 
+    messages = [sanitize_composed_warning_line(finding["message"]) for finding in findings]
+    if compact:
+        messages = messages[:_COMPACT_BLOCK_MESSAGES]
     lead = _QUERY_SCAN_KILLED_LEAD if scan.get("killed") else _QUERY_SCAN_LEAD
     return "\n".join(
         [
             f"<{QUERY_SCAN_WARNING_TAG}>",
-            lead.format(**numbers),
+            lead.format(**_analyzed_numbers(findings[0], numbers)),
             *(f"- {message}" for message in messages),
             _QUERY_SCAN_INSTRUCTION,
             f"</{QUERY_SCAN_WARNING_TAG}>",
@@ -168,6 +176,20 @@ def format_query_scan_warnings(response: dict[str, Any], team: "Team | None" = N
             "",
         ]
     )
+
+
+def _analyzed_numbers(finding: dict[str, Any], fallback: dict[str, str]) -> dict[str, str]:
+    """The numbers the findings were written from.
+
+    Every finding of one analysis quotes the run that analysis measured, and that run can be an
+    earlier one than the response we are decorating. Taking the lead from the same run keeps it
+    from contradicting the bullets under it.
+    """
+    rows_read = finding.get("rows_read")
+    duration_ms = finding.get("duration_ms")
+    if not isinstance(rows_read, int) or not isinstance(duration_ms, int):
+        return fallback
+    return {"rows": format_rows(rows_read), "secs": format_seconds(duration_ms)}
 
 
 def _format_pending_query_scan(

@@ -12,7 +12,7 @@ import { QueryScanState, queryScanStatLine } from './queryScan'
 
 export interface QueryScanBannerProps {
     queryScan: QueryScanState | null
-    /** Hands the findings' fix texts to the SQL fixer. Left out where there is no editor to write into. */
+    /** Hands the findings' fix texts to the SQL fixer, numbered. Left out where there is no editor to write into. */
     onFixWithAI?: (instruction: string) => void
     fixWithAILoading?: boolean
     className?: string
@@ -32,6 +32,9 @@ export function QueryScanBanner({
 
     const { summary, findings } = queryScan
     const showFindings = summary.status === 'done' && findings.length > 0 && showQueryScanAdvice
+    // A `filters` finding is fixed on the insight's date range, not in the SQL, so handing it to
+    // the fixer would ask it to change a query that is already right.
+    const fixableFindings = findings.filter((finding) => finding.reason !== 'filters')
 
     return (
         <div className={clsx('flex flex-col gap-2 shrink-0', className)} data-attr="query-scan">
@@ -50,14 +53,18 @@ export function QueryScanBanner({
                             </li>
                         ))}
                     </ul>
-                    {onFixWithAI && (
+                    {onFixWithAI && fixableFindings.length > 0 && (
                         <LemonButton
                             className="mt-2"
                             type="secondary"
                             size="small"
                             icon={<IconSparkles />}
                             loading={fixWithAILoading}
-                            onClick={() => onFixWithAI(findings.map((finding) => finding.fix).join(' '))}
+                            onClick={() =>
+                                onFixWithAI(
+                                    fixableFindings.map((finding, index) => `${index + 1}. ${finding.fix}`).join('\n')
+                                )
+                            }
                             data-attr="query-scan-fix-with-ai"
                         >
                             Fix with AI

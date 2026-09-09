@@ -111,7 +111,7 @@ Note: "persons" means "users" here - instead of a "users" table, we have a "pers
 
 FIXER_ROLE = "You fix HogQL errors that may come from either HogQL resolver errors or clickhouse execution errors. You don't help with other knowledge."
 
-ADVICE_ROLE = "You apply one instruction to a HogQL query. You don't help with other knowledge."
+ADVICE_ROLE = "You apply instructions to a HogQL query. You don't help with other knowledge."
 
 USER_PROMPT = """
 Fix the errors in the HogQL query below and only return the new updated query in your response.
@@ -127,15 +127,17 @@ Below is the current HogQL query and the error message
 """
 
 ADVICE_PROMPT = """
-Apply the instruction below to the HogQL query and only return the new updated query in your response.
+Apply the instructions below to the HogQL query and only return the new updated query in your response.
 
+- There may be several instructions, written as a numbered list. Apply every one of them.
 - Keep the question the query answers the same. The results must still mean what they meant before.
-- Don't change any other part of the query, including its formatting, capitalization and shorthand syntax.
-- Where the instruction needs event names you cannot know, write `('…')` in their place for the user to fill in.
+- Don't change any part of the query the instructions don't ask you to change, including its formatting, capitalization and shorthand syntax.
+- Where an instruction needs event names you cannot know, write `('…')` in their place for the user to fill in.
+- If no change would keep the question the same, return the query exactly as it is.
 
 {{schema_description}}
 
-Below is the current HogQL query and the instruction to apply
+Below is the current HogQL query and the instructions to apply
 """
 
 
@@ -203,9 +205,9 @@ def _get_advice_user_prompt(schema_description: str) -> str:
         + "\n\n<hogql_query>"
         + "{{{hogql_query}}}"
         + "</hogql_query>"
-        + "\n\n<instruction>"
+        + "\n\n<instructions>"
         + "{{{instruction}}}"
-        + "</instruction>"
+        + "</instructions>"
     )
 
 

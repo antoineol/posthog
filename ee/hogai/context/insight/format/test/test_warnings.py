@@ -104,6 +104,29 @@ def test_query_scan_block_says_clickhouse_stopped_a_killed_run():
     assert block.splitlines()[1] == "ClickHouse stopped this query after 12.3 s, having read 4.2 billion rows."
 
 
+def test_compact_query_scan_block_carries_two_findings():
+    # The killed-run block shares a 500-character error message with the failure itself, so it
+    # spends that room on the findings most likely to explain the read.
+    findings = [{**_SCAN_FINDING, "message": f"finding {index}"} for index in range(3)]
+
+    block = format_query_scan_warnings({"query_scan": _scan(killed=True), "warnings": findings}, compact=True)
+
+    assert "- finding 0" in block
+    assert "- finding 1" in block
+    assert "- finding 2" not in block
+
+
+def test_query_scan_block_leads_with_the_numbers_the_findings_were_written_from():
+    # A cached body carries the numbers of the run that filled it, while the findings quote the
+    # run that was analyzed. Leading with the response's numbers makes the lead contradict its
+    # own bullets.
+    response = {"query_scan": _scan(rows_read=1_000, duration_ms=1_100), "warnings": [_SCAN_FINDING]}
+
+    block = format_query_scan_warnings(response)
+
+    assert block.splitlines()[1] == "This query read 4.2 billion rows in 12.3 s, far more than it needs."
+
+
 @pytest.mark.parametrize(
     "response,expected",
     [

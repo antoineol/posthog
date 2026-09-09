@@ -19,7 +19,7 @@ from posthog.schema import HogQLQueryModifiers
 
 from posthog.hogql.query_stats import QueryStats
 
-from posthog.clickhouse.query_tagging import get_query_tag_value, is_api_key_access_method
+from posthog.clickhouse.query_tagging import Feature, get_query_tag_value, is_api_key_access_method
 from posthog.dataclasses import frozen
 from posthog.models.user import User
 from posthog.query_scan.flag import QueryScanFlag
@@ -67,6 +67,16 @@ def is_analyzable_principal(user: object) -> TypeGuard[User]:
     return isinstance(user, User)
 
 
+def _is_mcp_run() -> bool:
+    """Whether the run came from the MCP tool, which authenticates with a personal API key.
+
+    An MCP agent is a surface: the findings reach it in the block above the results, and it is
+    told to raise them with the person. So the API-key skip, which exists because a plain API
+    caller has nowhere to read advice, does not apply here.
+    """
+    return get_query_tag_value("feature") == Feature.MCP
+
+
 def _task_payload(model: BaseModel) -> dict[str, Any]:
     """The model as JSON the job can validate back into the same model.
 
@@ -103,7 +113,7 @@ def maybe_trigger_query_scan(
     duration_ms = round(stats.duration_ms)
     if duration_ms < flag.floor_ms:
         return QueryScanTrigger(triggered=False, skipped_reason="below_floor")
-    if is_api_key_access_method(get_query_tag_value("access_method")):
+    if is_api_key_access_method(get_query_tag_value("access_method")) and not _is_mcp_run():
         # An API caller has no surface to read the advice on, so the analysis would only cost.
         return QueryScanTrigger(triggered=False, skipped_reason="api_key")
     if not is_analyzable_principal(user):

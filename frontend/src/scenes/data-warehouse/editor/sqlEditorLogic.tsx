@@ -1810,12 +1810,19 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                 cache.fixErrorsMode = fixErrorsMode(instruction)
             },
             fixErrorsSuccess: ({ response, payload }) => {
-                actions.setSuggestedQueryInput(response.query, 'hogql_fixer')
-
                 posthog.capture('ai-error-fixer-success', {
                     trace_id: response.trace_id,
                     mode: fixErrorsMode(payload?.instruction),
                 })
+
+                // The advice prompt returns the query untouched when no change would keep the
+                // question the same, so an identical query is an answer, not a failed edit.
+                if (response.query === values.queryInput) {
+                    lemonToast.info('No change would keep the question the same, so the query is unchanged.')
+                    return
+                }
+
+                actions.setSuggestedQueryInput(response.query, 'hogql_fixer')
             },
             fixErrorsFailure: () => {
                 posthog.capture('ai-error-fixer-failure', { mode: cache.fixErrorsMode })

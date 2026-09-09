@@ -19,6 +19,12 @@ export interface QueryScanState {
     cacheKey: string | null
 }
 
+/** A polled scan and the run it was polled for. */
+export interface QueryScanPollResult {
+    cacheKey: string
+    scan: QueryScanApiResponse
+}
+
 interface ScanCarrier {
     query_scan?: QueryScanSummary
     cache_key?: string
@@ -56,7 +62,7 @@ export function queryScanFindings(warnings: unknown): QueryScanWarning[] {
 export function resolveQueryScan(
     response: unknown,
     responseErrorObject: unknown,
-    polled: QueryScanApiResponse | null
+    polled: QueryScanPollResult | null
 ): QueryScanState | null {
     const carrier = asCarrier(response) ?? errorScanCarrier(responseErrorObject)
     const summary = carrier?.query_scan
@@ -64,18 +70,21 @@ export function resolveQueryScan(
         return null
     }
     const cacheKey = typeof carrier?.cache_key === 'string' ? carrier.cache_key : null
-    if (!polled) {
+    // A poll outlives the run that started it, so a result for an earlier query would otherwise
+    // decorate whatever response is on screen when it lands.
+    if (!polled || polled.cacheKey !== cacheKey) {
         return { summary, findings: queryScanFindings(carrier?.warnings), cacheKey }
     }
+    const { scan } = polled
     return {
         summary: {
             ...summary,
-            status: polled.status,
-            events_in_range: polled.events_in_range ?? undefined,
-            range: polled.range ?? undefined,
-            killed: polled.killed,
+            status: scan.status,
+            events_in_range: scan.events_in_range ?? undefined,
+            range: scan.range ?? undefined,
+            killed: scan.killed,
         },
-        findings: [...queryScanFindings(carrier?.warnings), ...polled.warnings],
+        findings: [...queryScanFindings(carrier?.warnings), ...scan.warnings],
         cacheKey,
     }
 }

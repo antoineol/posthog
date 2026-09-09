@@ -32,7 +32,12 @@ import { teamLogic } from 'scenes/teamLogic'
 import { userLogic } from 'scenes/userLogic'
 
 import { DataNodeCollectionProps, dataNodeCollectionLogic } from '~/queries/nodes/DataNode/dataNodeCollectionLogic'
-import { QueryScanApiResponse, QueryScanState, resolveQueryScan } from '~/queries/nodes/DataNode/queryScan'
+import {
+    QueryScanApiResponse,
+    QueryScanPollResult,
+    QueryScanState,
+    resolveQueryScan,
+} from '~/queries/nodes/DataNode/queryScan'
 import { removeExpressionComment } from '~/queries/nodes/DataTable/utils'
 import { performQuery } from '~/queries/query'
 import {
@@ -301,7 +306,7 @@ export interface dataNodeLogicValues {
     queryLogLoading: boolean
     queryLogQueryId: string | null
     queryScan: QueryScanState | null
-    queryScanResult: QueryScanApiResponse | null
+    queryScanResult: QueryScanPollResult | null
     response:
         | ErrorTrackingQueryResponse
         | HogQLAutocompleteResponse
@@ -601,7 +606,11 @@ export interface dataNodeLogicActions {
     setQueryLogQueryId: (queryId: string) => {
         queryId: string
     }
-    setQueryScanResult: (result: QueryScanApiResponse) => {
+    setQueryScanResult: (
+        result: QueryScanApiResponse,
+        cacheKey: string
+    ) => {
+        cacheKey: string
         result: QueryScanApiResponse
     }
     setResponse: (
@@ -891,7 +900,7 @@ export interface dataNodeLogicMeta {
                 | TraceSpansQueryResponse
                 | null,
             responseErrorObject: Record<string, any> | null,
-            queryScanResult: QueryScanApiResponse | null
+            queryScanResult: QueryScanPollResult | null
         ) => QueryScanState | null
     }
 }
@@ -991,7 +1000,7 @@ export const dataNodeLogic = kea<dataNodeLogicType>([
         setQueryLogQueryId: (queryId: string) => ({ queryId }),
         loadFilteredCount: true,
         pollQueryScan: true,
-        setQueryScanResult: (result: QueryScanApiResponse) => ({ result }),
+        setQueryScanResult: (result: QueryScanApiResponse, cacheKey: string) => ({ result, cacheKey }),
     }),
     loaders(({ actions, cache, values, props }) => ({
         response: [
@@ -1355,10 +1364,10 @@ export const dataNodeLogic = kea<dataNodeLogicType>([
             },
         ],
         queryScanResult: [
-            null as QueryScanApiResponse | null,
+            null as QueryScanPollResult | null,
             {
                 loadData: () => null,
-                setQueryScanResult: (_, { result }) => result,
+                setQueryScanResult: (_, { result, cacheKey }) => ({ cacheKey, scan: result }),
             },
         ],
         responseError: [
@@ -2043,7 +2052,7 @@ export const dataNodeLogic = kea<dataNodeLogicType>([
                     | TraceSpansQueryResponse
                     | null,
                 responseErrorObject: Record<string, any> | null,
-                queryScanResult: QueryScanApiResponse | null
+                queryScanResult: QueryScanPollResult | null
             ): QueryScanState | null => resolveQueryScan(response, responseErrorObject, queryScanResult),
         ],
     })),
@@ -2100,7 +2109,7 @@ export const dataNodeLogic = kea<dataNodeLogicType>([
                 }
                 breakpoint()
                 if (scan.status === 'done') {
-                    actions.setQueryScanResult(scan)
+                    actions.setQueryScanResult(scan, cacheKey)
                     return
                 }
             }

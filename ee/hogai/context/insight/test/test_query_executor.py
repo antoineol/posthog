@@ -43,6 +43,7 @@ from posthog.hogql.errors import ExposedHogQLError
 
 from posthog.clickhouse.query_tagging import Feature, Product, get_query_tags, tags_context
 from posthog.errors import ExposedCHQueryError
+from posthog.query_scan.flag import QueryScanFlag
 from posthog.query_scan.slot import QueryScanSlot
 
 from ee.hogai.context.insight.query_executor import (
@@ -60,6 +61,14 @@ _SCAN_FINDING = QueryScanWarning(
     fix="Add an event filter naming the events this question is about. Change nothing else.",
     rows_read=4_200_000_000,
     duration_ms=12_300,
+)
+_SCAN_FLAG = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5)
+# ClickHouse says why it stopped a query at this length, which is what makes the order of the
+# error and the scan block matter inside a capped summary.
+_KILLED_RUN_ERROR = (
+    "Code: 241. DB::Exception: Memory limit (for query) exceeded: would use 58.31 GiB (attempt to "
+    "allocate chunk of 4.00 MiB), maximum: 58.00 GiB. While executing AggregatingTransform. "
+    "(MEMORY_LIMIT_EXCEEDED) (version 24.8.7.41)"
 )
 
 
@@ -289,10 +298,13 @@ class TestAssistantQueryExecutor(NonAtomicBaseTest):
 
         self.assertIn("ClickHouse error", str(context.exception))
 
+    @patch("ee.hogai.context.insight.query_executor.get_query_scan_flag", return_value=_SCAN_FLAG)
     @patch("ee.hogai.context.insight.query_executor.get_query_scan_slot")
     @patch("ee.hogai.context.insight.query_executor.process_query_dict")
-    async def test_run_and_format_query_prepends_scan_block_to_a_killed_run(self, mock_process_query, mock_get_slot):
-        error = ExposedCHQueryError("Query exceeded the memory limit")
+    async def test_run_and_format_query_appends_scan_block_to_a_killed_run(
+        self, mock_process_query, mock_get_slot, _mock_flag
+    ):
+        error = ExposedCHQueryError(_KILLED_RUN_ERROR)
         error.query_scan = {
             "mode": "show",
             "rows_read": 4_200_000_000,
@@ -308,14 +320,42 @@ class TestAssistantQueryExecutor(NonAtomicBaseTest):
             await self.query_runner.arun_and_format_query(AssistantTrendsQuery(series=[]))
 
         message = str(context.exception)
-        self.assertTrue(message.startswith("<query_scan_warning>"))
+        # The exposed error strips the driver's code prefix, so the failure text the agent reads
+        # is that stripped form. It has to sit before the block: a block in front of it would push
+        # it past the summary cap.
+        failure_text = str(ExposedCHQueryError(_KILLED_RUN_ERROR))
+        self.assertIn(failure_text, message)
+        self.assertLess(message.index(failure_text), message.index("<query_scan_warning>"))
         self.assertIn("ClickHouse stopped this query after 12.3 s", message)
         self.assertIn("- This query read every event in its date range", message)
-        self.assertIn("Query exceeded the memory limit", message)
+        # The agent reads the summary, not the message, and the summary is capped.
+        self.assertIn(failure_text, context.exception.to_summary())
 
+    @patch("ee.hogai.context.insight.query_executor.get_query_scan_flag", return_value=None)
     @patch("ee.hogai.context.insight.query_executor.get_query_scan_slot")
     @patch("ee.hogai.context.insight.query_executor.process_query_dict")
-    async def test_run_and_format_query_waits_for_the_scan_of_a_slow_run(self, mock_process_query, mock_get_slot):
+    async def test_run_and_format_query_does_not_wait_for_a_scan_it_cannot_show(
+        self, mock_process_query, mock_get_slot, _mock_flag
+    ):
+        # Waiting costs up to five seconds of the reply. A team the flag no longer matches has no
+        # surface for the findings, so the wait would buy nothing.
+        mock_process_query.return_value = {
+            "results": [[1]],
+            "columns": ["count"],
+            "cache_key": "cache_abc",
+            "query_scan": {"mode": "show", "rows_read": 4_200_000_000, "duration_ms": 12_300, "status": "pending"},
+        }
+
+        await self.query_runner.arun_and_format_query(AssistantHogQLQuery(query="SELECT count() FROM events"))
+
+        mock_get_slot.assert_not_called()
+
+    @patch("ee.hogai.context.insight.query_executor.get_query_scan_flag", return_value=_SCAN_FLAG)
+    @patch("ee.hogai.context.insight.query_executor.get_query_scan_slot")
+    @patch("ee.hogai.context.insight.query_executor.process_query_dict")
+    async def test_run_and_format_query_waits_for_the_scan_of_a_slow_run(
+        self, mock_process_query, mock_get_slot, _mock_flag
+    ):
         mock_process_query.return_value = {
             "results": [[1]],
             "columns": ["count"],

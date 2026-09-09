@@ -2734,6 +2734,27 @@ describe('sqlEditorLogic', () => {
         })
     })
 
+    describe('AI fixer results', () => {
+        it('leaves the editor alone when the fixer returns the query as it is', async () => {
+            // The advice prompt returns the query untouched when no change would keep the question
+            // the same. Handing that back to the editor opens a diff with nothing in it.
+            useMocks({
+                post: {
+                    '/api/environments/:team_id/fix_hogql': () => [200, { query: 'SELECT 1', trace_id: 'trace-2' }],
+                },
+            })
+            logic = sqlEditorLogic({ tabId: TAB_ID, monaco: createMockMonaco(), editor: createMockEditor() })
+            logic.mount()
+            logic.actions.createTab('SELECT 1')
+            await expectLogic(logic).toDispatchActions(['createTab', 'updateTab'])
+
+            fixSQLErrorsLogic.actions.fixErrors('SELECT 1', undefined, undefined, 'Add an event filter.')
+            await expectLogic(fixSQLErrorsLogic).toDispatchActions(['fixErrorsSuccess'])
+
+            expect(logic.values.suggestionPayload).toBeNull()
+        })
+    })
+
     describe('deleting the open view', () => {
         it('clears the tab and the editor content when the active view is deleted', async () => {
             const viewsLogic = dataWarehouseViewsLogic()

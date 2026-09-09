@@ -32,6 +32,22 @@ const FINDING: QueryScanWarning = {
     duration_ms: 19_000,
 }
 
+const START_DATE_FINDING: QueryScanWarning = {
+    ...FINDING,
+    kind: 'no_start_date',
+    message: 'This query has no start date.',
+    fix: 'Add a start date on `timestamp`.',
+}
+
+// The fix for a missing date range is on the insight, not in the SQL the fixer would rewrite.
+const INSIGHT_SIDE_FINDING: QueryScanWarning = {
+    ...FINDING,
+    kind: 'no_start_date',
+    reason: 'filters',
+    message: 'No date range is set for this insight or dashboard.',
+    fix: 'Set a date range on the insight or the dashboard.',
+}
+
 function state(summary: Partial<QueryScanSummary>, findings: QueryScanWarning[] = []): QueryScanState {
     return { summary: { ...SUMMARY, ...summary }, findings, cacheKey: 'cache-key' }
 }
@@ -67,18 +83,33 @@ describe('QueryScanBanner', () => {
         expect(screen.queryByText(FINDING.message)).not.toBeInTheDocument()
     })
 
-    it('hands the findings fix texts to the fixer', async () => {
+    it('hands the fixer a numbered list of the fixes it can make', async () => {
         seedAdviceHidden(false)
         const onFixWithAI = jest.fn()
         render(
             <Provider>
-                <QueryScanBanner queryScan={state({}, [FINDING])} onFixWithAI={onFixWithAI} />
+                <QueryScanBanner
+                    queryScan={state({}, [INSIGHT_SIDE_FINDING, FINDING, START_DATE_FINDING])}
+                    onFixWithAI={onFixWithAI}
+                />
             </Provider>
         )
 
         expect(screen.getByText(FINDING.message)).toBeVisible()
         await userEvent.click(screen.getByText('Fix with AI'))
-        expect(onFixWithAI).toHaveBeenCalledWith(FINDING.fix)
+        expect(onFixWithAI).toHaveBeenCalledWith(`1. ${FINDING.fix}\n2. ${START_DATE_FINDING.fix}`)
+    })
+
+    it('drops the fixer when every finding is fixed on the insight', () => {
+        seedAdviceHidden(false)
+        render(
+            <Provider>
+                <QueryScanBanner queryScan={state({}, [INSIGHT_SIDE_FINDING])} onFixWithAI={jest.fn()} />
+            </Provider>
+        )
+
+        expect(screen.getByText(INSIGHT_SIDE_FINDING.message)).toBeVisible()
+        expect(screen.queryByText('Fix with AI')).not.toBeInTheDocument()
     })
 
     it('keeps the stat line but drops the advice when the toggle is off', () => {

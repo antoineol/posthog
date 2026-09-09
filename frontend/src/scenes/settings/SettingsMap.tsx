@@ -2272,6 +2272,7 @@ export const SETTINGS_MAP: SettingSection[] = [
                 title: 'Advice on slow queries',
                 description: 'The slow query icon stays either way.',
                 component: <QueryScanAdviceSetting />,
+                flag: 'QUERY_SCAN_WARNINGS',
                 keywords: ['slow', 'query', 'advice', 'sql', 'performance', 'scan'],
             },
             {

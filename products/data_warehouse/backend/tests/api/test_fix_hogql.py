@@ -3,7 +3,10 @@ from unittest import mock
 
 from parameterized import parameterized
 
+from posthog.rate_limit import AIBurstRateThrottle, AISustainedRateThrottle
+
 from products.data_warehouse.backend.max_tools import HogQLQueryFixerTool
+from products.data_warehouse.backend.presentation.views.fix_hogql import FixHogQLViewSet
 
 
 class TestFixHogQL(APIBaseTest):
@@ -85,7 +88,14 @@ class TestFixHogQL(APIBaseTest):
             messages = mock_model.return_value.with_structured_output.return_value.invoke.call_args[0][0]
             system_prompt, user_prompt = messages[0].content, messages[1].content
 
-        assert "You apply one instruction to a HogQL query." in system_prompt
+        assert "You apply instructions to a HogQL query." in system_prompt
         assert "You fix HogQL errors" not in system_prompt
         assert instruction in user_prompt
         assert "<error>" not in user_prompt
+        # The banner sends one numbered list per finding, and a query nothing can improve without
+        # changing the question comes back untouched for the editor to report.
+        assert "Apply every one of them." in user_prompt
+        assert "return the query exactly as it is" in user_prompt
+
+    def test_fixing_a_query_uses_the_ai_throttles(self):
+        assert FixHogQLViewSet.throttle_classes == [AIBurstRateThrottle, AISustainedRateThrottle]

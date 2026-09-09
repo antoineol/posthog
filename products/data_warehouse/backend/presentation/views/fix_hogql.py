@@ -13,6 +13,7 @@ from posthog.api.documentation import _FallbackSerializer, extend_schema
 from posthog.api.mixins import ValidatedRequest, validated_request
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.models.user import User
+from posthog.rate_limit import AIBurstRateThrottle, AISustainedRateThrottle
 
 
 class FixHogQLRequestSerializer(serializers.Serializer):
@@ -39,8 +40,9 @@ class FixHogQLRequestSerializer(serializers.Serializer):
         allow_blank=True,
         default="",
         help_text=(
-            "A change to apply to the query, such as adding an event filter. Used only when `error` "
-            "is empty. The tool keeps the question the query answers the same."
+            "The changes to apply to the query, such as adding an event filter. Several changes go "
+            "in one numbered list. Used only when `error` is empty. The tool keeps the question the "
+            "query answers the same, and returns the query unchanged when no change would."
         ),
     )
 
@@ -58,6 +60,8 @@ class FixHogQLErrorSerializer(serializers.Serializer):
 class FixHogQLViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     scope_object = "INTERNAL"
     serializer_class = _FallbackSerializer
+    # Every request runs an LLM, so this endpoint carries the same budget as the other AI ones.
+    throttle_classes = [AIBurstRateThrottle, AISustainedRateThrottle]
 
     @extend_schema(operation_id="fix_hogql_list")
     def list(self, request: Request, *args, **kwargs) -> Response:
