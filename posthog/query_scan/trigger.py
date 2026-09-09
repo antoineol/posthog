@@ -7,7 +7,7 @@ passed every other test.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -22,7 +22,6 @@ from posthog.query_scan.slot import (
     get as get_slot,
     set_pending,
 )
-from posthog.schema_helpers import to_dict
 
 SkipReason = Literal["flag_off", "below_floor", "api_key", "not_cacheable", "slot_exists"]
 
@@ -36,6 +35,15 @@ class QueryScanTrigger:
 
 
 FLAG_OFF = QueryScanTrigger(triggered=False, skipped_reason="flag_off")
+
+
+def _task_payload(model: BaseModel) -> dict[str, Any]:
+    """The model as JSON the job can validate back into the same model.
+
+    Every nested `kind` discriminator has to survive: a dump that drops defaults strips them, and
+    a series without them no longer parses.
+    """
+    return model.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
 def maybe_trigger_query_scan(
@@ -81,8 +89,8 @@ def maybe_trigger_query_scan(
     analyze_query_scan.delay(
         team_id=team_id,
         cache_key=cache_key,
-        query=to_dict(query),
-        modifiers=to_dict(modifiers) if modifiers is not None else None,
+        query=_task_payload(query),
+        modifiers=_task_payload(modifiers) if modifiers is not None else None,
         insight_id=insight_id,
         dashboard_id=dashboard_id,
         rows_read=stats.rows_read,

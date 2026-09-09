@@ -7,7 +7,7 @@ from django.test import SimpleTestCase
 
 from parameterized import parameterized
 
-from posthog.schema import HogQLQuery
+from posthog.schema import EventsNode, FunnelsQuery, HogQLQuery, TrendsQuery
 
 from posthog.hogql.query_stats import QueryStats
 
@@ -76,8 +76,15 @@ class TestQueryScanTrigger(SimpleTestCase):
         self.delay.assert_not_called()
         self.redis.set.assert_not_called()
 
-    def test_enqueues_and_writes_a_pending_slot(self) -> None:
-        result = self._trigger()
+    @parameterized.expand(
+        [
+            ("hogql", HogQLQuery(query="select 1")),
+            ("trends", TrendsQuery(series=[EventsNode(event="$pageview")])),
+            ("funnels", FunnelsQuery(series=[EventsNode(event="a"), EventsNode(event="b")])),
+        ]
+    )
+    def test_enqueues_and_writes_a_pending_slot(self, _name, query) -> None:
+        result = self._trigger(query=query)
 
         assert result.triggered is True
         assert result.skipped_reason is None
@@ -87,7 +94,8 @@ class TestQueryScanTrigger(SimpleTestCase):
         assert enqueued["rows_read"] == 10
         assert enqueued["duration_ms"] == 2000
         assert enqueued["trigger"] == "fresh"
-        assert enqueued["query"]["query"] == "select 1"
+        # The job rebuilds the query from this payload, so it has to validate back unchanged.
+        assert type(query).model_validate(enqueued["query"]) == query
 
         key, payload = self.redis.set.call_args.args
         assert key == "query_scan:1:cache_key_1"
