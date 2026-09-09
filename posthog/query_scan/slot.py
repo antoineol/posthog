@@ -47,13 +47,21 @@ class QueryScanSlot:
     findings: tuple[QueryScanWarning, ...] = ()
     killed: bool = False
     error_type: str | None = None
+    thresholds: str | None = None
 
 
 def slot_key(team_id: int, cache_key: str) -> str:
     return f"query_scan:{team_id}:{cache_key}"
 
 
-def get(team_id: int, cache_key: str) -> QueryScanSlot | None:
+def get(team_id: int, cache_key: str, *, thresholds: str | None = None) -> QueryScanSlot | None:
+    """The stored slot, or None when there is none to serve.
+
+    ``thresholds`` is the fingerprint of the gates in force now. A done slot analyzed under other
+    gates holds findings this configuration would not produce, so it reads as no slot and the next
+    slow run analyzes again. Omit it to read the slot as stored. A pending slot is never rejected:
+    the job reads the current gates itself, so rejecting it would only enqueue a second one.
+    """
     try:
         # The primary, not the read replica the query cache reads through. The response that
         # enqueues a scan reads the slot back in the same request, and the skip test that stops a
@@ -61,7 +69,12 @@ def get(team_id: int, cache_key: str) -> QueryScanSlot | None:
         raw = query_cache_raw_client().get(slot_key(team_id, cache_key))
         if raw is None:
             return None
-        return _deserialize(json.loads(raw))
+        slot = _deserialize(json.loads(raw))
+        if slot is None:
+            return None
+        if thresholds is not None and slot.status == QueryScanStatus.DONE and slot.thresholds != thresholds:
+            return None
+        return slot
     except Exception:
         logger.warning("query_scan_slot_read_failed", team_id=team_id, exc_info=True)
         return None
@@ -103,6 +116,7 @@ def _serialize(slot: QueryScanSlot) -> dict[str, Any]:
         "range": slot.range.model_dump(by_alias=True) if slot.range is not None else None,
         "explain_ok": slot.explain_ok,
         "findings": [finding.model_dump(by_alias=True, exclude_none=True) for finding in slot.findings],
+        "thresholds": slot.thresholds,
     }
     if slot.killed:
         value["killed"] = True
@@ -134,4 +148,5 @@ def _deserialize(value: Any) -> QueryScanSlot | None:
         else (),
         killed=bool(value.get("killed", False)),
         error_type=value.get("error_type"),
+        thresholds=value.get("thresholds"),
     )

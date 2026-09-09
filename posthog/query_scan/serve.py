@@ -90,4 +90,4 @@ def _look_up(team: Team, duration_ms: Any, cache_key: str | None) -> _SlotLookup
     flag = get_query_scan_flag(team)
     if flag is None or duration_ms < flag.floor_ms:
         return _SlotLookup(over_floor=False)
-    return _SlotLookup(over_floor=True, slot=get_slot(team.pk, cache_key))
+    return _SlotLookup(over_floor=True, slot=get_slot(team.pk, cache_key, thresholds=flag.thresholds_fingerprint))

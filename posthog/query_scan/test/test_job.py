@@ -92,6 +92,21 @@ class TestQueryScanJob(BaseTest):
         assert properties["events_in_range"] == EVENTS_IN_RANGE
         assert properties["explain_ok"] is True
 
+    def test_a_done_slot_from_other_thresholds_reads_as_absent(self) -> None:
+        self._run()
+
+        assert slot.get(self.team.pk, "cache_key_1", thresholds=FLAG.thresholds_fingerprint) is not None
+        raised = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.9, persons_ratio=0.5)
+        assert slot.get(self.team.pk, "cache_key_1", thresholds=raised.thresholds_fingerprint) is None
+
+    def test_a_pending_slot_survives_a_threshold_change(self) -> None:
+        # The job in flight reads the current gates itself, so rejecting its slot would only
+        # enqueue a second one.
+        slot.set_pending(self.team.pk, "cache_key_2")
+
+        raised = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.9, persons_ratio=0.5)
+        assert slot.get(self.team.pk, "cache_key_2", thresholds=raised.thresholds_fingerprint) is not None
+
     def test_a_failed_explain_still_writes_a_done_slot(self) -> None:
         self._run(explain=Exception("EXPLAIN timed out"))
 

@@ -78,7 +78,7 @@ def maybe_trigger_query_scan(
         return QueryScanTrigger(triggered=False, skipped_reason="api_key")
     if not cacheable:
         return QueryScanTrigger(triggered=False, skipped_reason="not_cacheable")
-    if get_slot(team_id, cache_key) is not None:
+    if get_slot(team_id, cache_key, thresholds=flag.thresholds_fingerprint) is not None:
         return QueryScanTrigger(triggered=False, skipped_reason="slot_exists")
 
     # The query runner imports this module, and the task's job imports the query runner, so a

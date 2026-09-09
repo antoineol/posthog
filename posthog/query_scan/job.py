@@ -129,6 +129,7 @@ def _run(job: QueryScanJob, started: float) -> None:
             findings=tuple(analysis.result.findings),
             killed=job.killed,
             error_type=job.error_type,
+            thresholds=flag.thresholds_fingerprint,
         ),
     )
     _report(job, analysis, query_kind=query_kind, job_ms=round((perf_counter() - started) * 1000))

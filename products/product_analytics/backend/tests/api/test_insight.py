@@ -5038,12 +5038,14 @@ class TestInsightQueryScan(ClickhouseTestMixin, APIBaseTest):
             timezone=self.team.timezone,
             query_scan={"mode": "show", "rows_read": 41_200, "duration_ms": 19_000},
         )
+        flag = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5)
         redis_client = mock.Mock()
         redis_client.get.return_value = json.dumps(
             {
                 "version": 1,
                 "status": "done",
                 "events_in_range": 16_000,
+                "thresholds": flag.thresholds_fingerprint,
                 "findings": [
                     {
                         "type": "query_scan",
@@ -5058,10 +5060,7 @@ class TestInsightQueryScan(ClickhouseTestMixin, APIBaseTest):
         )
 
         with (
-            patch(
-                "posthog.query_scan.serve.get_query_scan_flag",
-                return_value=QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5),
-            ),
+            patch("posthog.query_scan.serve.get_query_scan_flag", return_value=flag),
             patch("posthog.query_scan.slot.query_cache_raw_client", return_value=redis_client),
         ):
             response = self.client.get(f"/api/projects/{self.team.id}/insights/{insight.id}/")

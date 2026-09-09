@@ -22,8 +22,8 @@ def _tag_as_api_key(test: "TestQueryScanTrigger") -> None:
     tag_queries(access_method=AccessMethod.PERSONAL_API_KEY)
 
 
-def _store_a_slot(test: "TestQueryScanTrigger") -> None:
-    test.redis.get.return_value = json.dumps({"version": 1, "status": "done", "findings": []})
+def _store_a_slot(test: "TestQueryScanTrigger", thresholds: str = FLAG.thresholds_fingerprint) -> None:
+    test.redis.get.return_value = json.dumps({"version": 1, "status": "done", "findings": [], "thresholds": thresholds})
 
 
 class TestQueryScanTrigger(SimpleTestCase):
@@ -74,6 +74,16 @@ class TestQueryScanTrigger(SimpleTestCase):
         assert result.skipped_reason == expected_reason
         self.delay.assert_not_called()
         self.redis.set.assert_not_called()
+
+    def test_a_slot_from_other_thresholds_does_not_stop_a_new_scan(self) -> None:
+        # The ratios decide whether a finding exists, so a payload change has to re-analyze
+        # instead of leaving the old findings in place until the slot expires.
+        _store_a_slot(self, thresholds="0.9:0.5")
+
+        result = self._trigger()
+
+        assert result.triggered is True
+        assert self.delay.call_count == 1
 
     @parameterized.expand(
         [

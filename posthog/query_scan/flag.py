@@ -38,6 +38,12 @@ class QueryScanFlag:
     event_ratio: float
     persons_ratio: float
 
+    @property
+    def thresholds_fingerprint(self) -> str:
+        """The gates an analysis ran under. The ratios decide whether a finding exists at all, so a
+        stored analysis from other ratios holds advice this payload would not give."""
+        return f"{self.event_ratio!r}:{self.persons_ratio!r}"
+
 
 _flag_cache: TTLCache[int, QueryScanFlag | None] = TTLCache(maxsize=CACHE_MAX_TEAMS, ttl=CACHE_TTL_SECONDS)
 # cachetools caches are not thread-safe; the lock guards threaded WSGI/Celery workers.

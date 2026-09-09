@@ -60,6 +60,7 @@ from posthog.hogql_queries.query_runner import ExecutionMode, execution_mode_fro
 from posthog.models.user import User
 from posthog.models.utils import uuid7
 from posthog.query_scan import slot as query_scan_slot
+from posthog.query_scan.flag import get_query_scan_flag
 from posthog.rate_limit import (
     AIBurstRateThrottle,
     AISustainedRateThrottle,
@@ -619,7 +620,9 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
     )
     @action(methods=["GET"], detail=True, url_path="scan", required_scopes=["query:read"])
     def get_query_scan(self, request: Request, pk: str, *args, **kwargs) -> Response:
-        slot = query_scan_slot.get(self.team_id, pk)
+        # With the flag off there is no current configuration to hold the stored analysis to.
+        flag = get_query_scan_flag(self.team)
+        slot = query_scan_slot.get(self.team_id, pk, thresholds=flag.thresholds_fingerprint if flag else None)
         if slot is None:
             raise NotFound("There is no query scan for this cache key.")
         return Response(
