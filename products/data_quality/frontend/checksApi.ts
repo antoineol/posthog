@@ -9,10 +9,12 @@ import {
     dataCatalogMetricsChecksDestroy,
     dataCatalogMetricsChecksHealthRetrieve,
     dataCatalogMetricsChecksList,
+    dataCatalogMetricsChecksOutputSchemaRetrieve,
     dataCatalogMetricsChecksPartialUpdate,
     dataCatalogMetricsChecksRunAllCreate,
     dataCatalogMetricsChecksRunCreate,
     dataCatalogMetricsChecksRunsList,
+    dataQualityChecksMetricSubjectsList,
     warehouseSavedQueriesCheckSuiteRunsCheckRunsList,
     warehouseSavedQueriesCheckSuiteRunsList,
     warehouseSavedQueriesCheckSuiteRunsRetrieve,
@@ -77,14 +79,13 @@ function isMetric({ subjectType }: DataQualitySubjectRef): boolean {
 }
 
 export const checksApi = {
-    metricSubjects: (): Promise<DataQualityMetricSubjectApi[]> =>
-        metricApi.dataQualityChecksMetricSubjectsList(projectId()),
+    metricSubjects: (): Promise<DataQualityMetricSubjectApi[]> => dataQualityChecksMetricSubjectsList(projectId()),
 
     outputSchema: (ref: DataQualitySubjectRef): Promise<DataQualityOutputSchemaApi> => {
         if (ref.subjectType !== 'metric') {
             return Promise.resolve({ columns: [] })
         }
-        return metricApi.dataCatalogMetricsChecksOutputSchemaRetrieve(projectId(), ref.subjectId)
+        return dataCatalogMetricsChecksOutputSchemaRetrieve(projectId(), ref.subjectId)
     },
 
     list: (ref: DataQualitySubjectRef, limit: number): Promise<PaginatedDataQualityCheckListApi> =>
