@@ -445,14 +445,17 @@ def _check_direct_host(config, team_id: int | None) -> None:
     Unlike `_pinned_ssh_host` this checks without pinning, because the `(host, port)` this
     layer yields has to stay the hostname: the clients need it for SNI and for multi-address
     failover. So on its own this closes the standing exposure, not the resolve-to-connect race.
-    The Postgres client closes that race itself: `_open_connection` in `postgres.py` resolves
-    the host once, validates that answer with `check_resolved_addresses`, and dials exactly
-    those addresses through libpq's `host`/`hostaddr` pair. The Redshift, MySQL and MSSQL
-    clients still hand the hostname to their driver, so for them this check is the only one.
+    The Postgres and Redshift clients close that race themselves: `pinned_host_kwargs` in
+    `postgres.py` resolves the host once, validates that answer with `check_resolved_addresses`,
+    and dials exactly those addresses through libpq's `host`/`hostaddr` pair. The MySQL client
+    resolves the host itself, validates the answer with `check_resolved_addresses`, and dials
+    it on a socket it opens, so the hostname still reaches TLS. The MSSQL client hands the
+    hostname to its driver, whose single `server` argument is both the dial target and the
+    login server name, so for MSSQL this check is the only one.
 
     A `team_id` of None fails closed. It changes nothing for a customer team, whose result is the
     same either way; it only costs the internal-host exemption on entry points that don't carry a
-    team yet (`open_ssh_tunnel(config)` in the Redshift, MySQL and MSSQL clients).
+    team yet.
 
     The resolve inside `resolve_safe_host` is unbounded. A stalled resolver therefore hangs the
     activity until Temporal's `start_to_close_timeout` rather than failing fast and retryably.

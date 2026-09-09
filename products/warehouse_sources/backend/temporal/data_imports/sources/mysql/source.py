@@ -431,7 +431,7 @@ class MySQLSource(SQLSource[MySQLSourceConfig], SSHTunnelMixin, ValidateDatabase
     ) -> dict[str, object]:
         # `require_ssl` keeps signature parity with Postgres; MySQL SSL is governed by
         # `config.using_ssl` inside `connect`.
-        with self.get_implementation.connect(config) as conn:
+        with self.get_implementation.connect(config, team_id=team_id) as conn:
             return get_mysql_connection_metadata(conn, database=config.database)
 
     def validate_credentials(

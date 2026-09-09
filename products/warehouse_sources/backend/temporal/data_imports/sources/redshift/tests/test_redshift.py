@@ -1,7 +1,12 @@
+import socket
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date
 
 import pytest
 from unittest.mock import MagicMock, call, patch
+
+from django.test import override_settings
 
 import psycopg
 import pyarrow as pa
@@ -1601,3 +1606,57 @@ class TestGetConnectionMetadata:
         metadata = RedshiftSource().get_connection_metadata(_make_config(schema=schema), team_id=1)
 
         assert metadata == {"engine": "redshift", "database": "dev", "schema": expected_schema}
+
+
+_REDSHIFT_MODULE = "products.warehouse_sources.backend.temporal.data_imports.sources.redshift.redshift"
+
+
+class TestRedshiftConnectDialsOnlyValidatedAddresses:
+    @staticmethod
+    # nosemgrep: semgrep.rules.devex.tuple-return-prefer-dataclass -- mirrors socket.getaddrinfo's positional result
+    def _addrinfo(*addresses: str) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (address, 5439)) for address in addresses]
+
+    @contextmanager
+    def _production_cloud(self, *addresses: str) -> Iterator[MagicMock]:
+        with (
+            override_settings(CLOUD_DEPLOYMENT="US"),
+            patch(f"{_REDSHIFT_MODULE}.open_ssh_tunnel") as tunnel_mock,
+            patch(
+                "products.warehouse_sources.backend.temporal.data_imports.sources.common.mixins.settings"
+            ) as mock_settings,
+            patch("posthog.psycopg_helpers.socket.getaddrinfo", return_value=self._addrinfo(*addresses)),
+            patch("posthog.psycopg_helpers.has_ipv6_route", return_value=True),
+            patch(f"{_REDSHIFT_MODULE}.psycopg.connect") as connect_mock,
+        ):
+            tunnel_mock.return_value.__enter__.return_value = ("db.example.com", 5439)
+            mock_settings.TEST = False
+            mock_settings.DEBUG = False
+            mock_settings.E2E_TESTING = False
+            connect_mock.return_value.__enter__.return_value = MagicMock()
+            yield connect_mock
+
+    def test_an_internal_address_in_the_resolved_set_refuses_the_connect(self) -> None:
+        with self._production_cloud("52.1.2.3", "10.0.0.5") as connect_mock:
+            with pytest.raises(Exception, match="Database host not allowed"):
+                with RedshiftImplementation().connect(_make_config(), team_id=999):
+                    pass
+
+        connect_mock.assert_not_called()
+
+    def test_a_public_set_is_dialed_pinned_with_the_hostname_kept(self) -> None:
+        with self._production_cloud("52.1.2.3", "52.1.2.4") as connect_mock:
+            with RedshiftImplementation().connect(_make_config(), team_id=999):
+                pass
+
+        kwargs = connect_mock.call_args.kwargs
+        assert kwargs["host"] == "db.example.com,db.example.com"
+        assert kwargs["hostaddr"] == "52.1.2.3,52.1.2.4"
+        assert kwargs["port"] == 5439
+
+    def test_the_team_reaches_the_host_policy(self) -> None:
+        with self._production_cloud("10.0.0.5") as connect_mock:
+            with RedshiftImplementation().connect(_make_config(), team_id=2):
+                pass
+
+        assert connect_mock.call_args.kwargs["hostaddr"] == "10.0.0.5"
