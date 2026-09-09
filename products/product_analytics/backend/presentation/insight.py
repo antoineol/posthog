@@ -1112,7 +1112,12 @@ class InsightSerializer(InsightBasicSerializer):
 
     @extend_schema_field(OpenApiTypes.ANY)
     def get_query_status(self, insight: Insight):
-        return self.insight_result(insight).query_status
+        query_status = self.insight_result(insight).query_status
+        if not self.context.get("is_shared") or not isinstance(query_status, dict):
+            return query_status
+        # Both fields address the stored analysis of the project's data, which a shared insight
+        # is read from outside the project.
+        return {key: value for key, value in query_status.items() if key not in ("cache_key", "query_scan")}
 
     def _query_variables_mapping(self, query: dict):
         if (

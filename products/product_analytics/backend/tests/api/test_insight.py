@@ -5116,6 +5116,48 @@ class TestInsightQueryScan(ClickhouseTestMixin, APIBaseTest):
         # The cache key addresses the stored analysis, so the client can poll for it.
         self.assertEqual(body["filters_hash"], "cache-key")
 
+    # A shared insight is read by people outside the project, and both the summary and the cache
+    # key that addresses the stored analysis describe the project's own data volume.
+    @patch("posthog.caching.calculate_results.calculate_for_query_based_insight")
+    def test_a_shared_insight_carries_neither_the_scan_nor_the_cache_key_that_addresses_it(
+        self, mock_calculate: mock.MagicMock
+    ) -> None:
+        insight = Insight.objects.create(
+            team=self.team,
+            created_by=self.user,
+            query={"kind": "TrendsQuery", "series": [{"kind": "EventsNode", "event": "$pageview"}]},
+        )
+        sharing_configuration = SharingConfiguration.objects.create(
+            team=self.team, insight=insight, enabled=True, access_token="xyz"
+        )
+        mock_calculate.return_value = InsightResult(
+            result=None,
+            last_refresh=timezone.now(),
+            cache_key="cache-key",
+            is_cached=False,
+            timezone=self.team.timezone,
+            # The shape an async run that ClickHouse stopped leaves on the stored status.
+            query_status={
+                "id": "query-1",
+                "team_id": self.team.pk,
+                "error": True,
+                "cache_key": "cache-key",
+                "query_scan": {"mode": "show", "rows_read": 41_200, "duration_ms": 19_000, "killed": True},
+            },
+        )
+        self.client.logout()
+
+        response = self.client.get(
+            f"/api/projects/{self.team.id}/insights/{insight.id}/"
+            f"?sharing_access_token={sharing_configuration.access_token}"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.json())
+        body = response.json()
+        self.assertIsNone(body["query_scan"])
+        self.assertNotIn("cache_key", body["query_status"])
+        self.assertNotIn("query_scan", body["query_status"])
+
 
 class TestInsightBulkDelete(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):
     def _create_insight(self, name: str = "My insight") -> Insight:

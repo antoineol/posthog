@@ -73,7 +73,6 @@ from posthog.schema import (
     PathsV2Query,
     PropertyGroupFilter,
     PropertyGroupFilterValue,
-    QueryScanMode,
     QueryStatus,
     QueryStatusResponse,
     QueryTiming,
@@ -170,6 +169,8 @@ from posthog.query_scan.flag import QueryScanFlag, get_query_scan_flag
 from posthog.query_scan.serve import attach_scan_slot
 from posthog.query_scan.trigger import (
     FLAG_OFF as QUERY_SCAN_FLAG_OFF,
+    NO_PRINCIPAL as QUERY_SCAN_NO_PRINCIPAL,
+    is_analyzable_principal,
     maybe_trigger_query_scan,
 )
 from posthog.schema_helpers import to_dict
@@ -2269,6 +2270,10 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                         )
                         if results:
                             cache_tracking_props = {}
+                            # Cached from the fresh run that produced these results, so the numbers
+                            # describe that run rather than this one, which touched no ClickHouse.
+                            # Read before serving, which can take the field off the response.
+                            cached_query_scan = getattr(results, "query_scan", None)
                             if isinstance(results, CachedResponse):
                                 if (not trigger or not trigger.startswith("warming")) and results.query_metadata:
                                     log_event_usage_from_query_metadata(
@@ -2291,22 +2296,9 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                                     cache_hit=True,
                                     **cache_tracking_props,
                                 )
-                                attach_scan_slot(self.team, results)
+                                self._serve_query_scan(results, user)
                             else:
                                 slo.tag(execution_path="cache_miss", cache_hit=False)
-
-                            # The measurements belong to the run that wrote the entry, but the mode
-                            # does not: an insight entry outlives a flag rollback by days, so re-read
-                            # the flag instead of serving the stamped mode.
-                            cached_query_scan = getattr(results, "query_scan", None)
-                            if cached_query_scan is not None:
-                                current_scan_flag = get_query_scan_flag(self.team)
-                                if current_scan_flag is None:
-                                    # setattr because the response type does not declare the field.
-                                    setattr(results, "query_scan", None)  # noqa: B010
-                                    cached_query_scan = None
-                                else:
-                                    cached_query_scan.mode = QueryScanMode(current_scan_flag.mode)
 
                             query_executed_props = {
                                 "insight_id": insight_id,
@@ -2348,7 +2340,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                     )
                     # A fresh run of a query analyzed earlier still has a done slot, so this is
                     # where the findings reach a recomputed response.
-                    attach_scan_slot(self.team, fresh_response)
+                    self._serve_query_scan(fresh_response, user)
                     return fresh_response
                 except Exception as exc:
                     if getattr(exc, "served_from_query_failure_cache", False):
@@ -2531,29 +2523,36 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
             # serialization the enqueue needs off every other team's path.
             scan = QUERY_SCAN_FLAG_OFF
             if query_scan_flag is not None and query_stats is not None and "query_scan" in CachedResponse.model_fields:
-                query_scan: dict[str, Any] = {
-                    "mode": query_scan_flag.mode,
-                    "rows_read": query_stats.rows_read,
-                    "duration_ms": round(query_stats.duration_ms),
-                }
-                fresh_response_dict["query_scan"] = query_scan
-                scan = maybe_trigger_query_scan(
-                    flag=query_scan_flag,
-                    stats=query_stats,
-                    team_id=self.team.pk,
-                    cache_key=cache_key,
-                    # Dashboard filters, tile overrides and variable overrides are already applied
-                    # here, which is why the cache key is the right identity for the analysis.
-                    query=self.query,
-                    modifiers=self.modifiers,
-                    insight_id=insight_id,
-                    dashboard_id=dashboard_id,
-                    trigger="fresh",
-                    user=user,
-                    cacheable=cacheable,
-                )
-                if scan.triggered:
-                    query_scan["status"] = "pending"
+                if not is_analyzable_principal(user):
+                    # The job cannot rebuild this run, so there is nothing to enqueue, and the
+                    # numbers stay off the response because a shared link is read from outside
+                    # the project.
+                    scan = QUERY_SCAN_NO_PRINCIPAL
+                else:
+                    query_scan: dict[str, Any] = {
+                        "mode": query_scan_flag.mode,
+                        "rows_read": query_stats.rows_read,
+                        "duration_ms": round(query_stats.duration_ms),
+                    }
+                    fresh_response_dict["query_scan"] = query_scan
+                    scan = maybe_trigger_query_scan(
+                        flag=query_scan_flag,
+                        stats=query_stats,
+                        team_id=self.team.pk,
+                        cache_key=cache_key,
+                        # Dashboard filters, tile overrides and variable overrides are already
+                        # applied here, which is why the cache key is the right identity for the
+                        # analysis.
+                        query=self.query,
+                        modifiers=self.modifiers,
+                        insight_id=insight_id,
+                        dashboard_id=dashboard_id,
+                        trigger="fresh",
+                        user=user,
+                        cacheable=cacheable,
+                    )
+                    if scan.triggered:
+                        query_scan["status"] = "pending"
 
             if cacheable:
                 cache_manager.store_result(
@@ -2597,6 +2596,18 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
 
             return CachedResponse(**fresh_response_dict)
 
+    def _serve_query_scan(self, response: Any, user: Optional[User]) -> None:
+        """Fold the stored analysis into an outgoing response, or take the field off it when the
+        reader is not the person the run was analyzed for.
+
+        A cached body written for a real user still carries the summary, so a shared-link viewer
+        of the same insight would otherwise be served the project's data volume from the cache.
+        """
+        if is_analyzable_principal(user):
+            attach_scan_slot(self.team, response)
+        elif getattr(response, "query_scan", None) is not None:
+            response.query_scan = None
+
     def _analyze_killed_run(
         self,
         error: Exception,
@@ -2614,6 +2625,10 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
         The error is re-raised unchanged whatever happens here, so nothing in this method may
         replace the failure the person needs to see.
         """
+        if not is_analyzable_principal(user):
+            # Same gate as the fresh path: the job cannot rebuild this run, and the summary must
+            # not ride out on an error body a shared link renders.
+            return
         try:
             scan = maybe_trigger_query_scan(
                 flag=flag,

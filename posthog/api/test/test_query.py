@@ -49,6 +49,7 @@ from posthog.exceptions import APIQueriesBudgetExceeded, ClickHouseQueryTimeOut
 from posthog.llm.completions import OpenAICompletion
 from posthog.models import PersonalAPIKey
 from posthog.models.utils import UUIDT, generate_random_token_personal, hash_key_value
+from posthog.query_scan.flag import QueryScanFlag
 
 from products.event_definitions.backend.models.property_definition import PropertyDefinition, PropertyType
 from products.managed_warehouse.backend.facade.query_labels import MANAGED_WAREHOUSE_QUERY_STATUS_LABEL_PREFIX
@@ -1350,6 +1351,31 @@ class TestQueryRetrieve(APIBaseTest):
         self.assertEqual(self.redis_client_mock.delete.call_count, 2)
 
 
+SHOW_FLAG = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5)
+LOG_ONLY_FLAG = QueryScanFlag(mode="log_only", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5)
+
+A_STORED_SCAN = json.dumps(
+    {
+        "version": 1,
+        "status": "done",
+        "events_in_range": 16_000,
+        "range": {"date_from": "2025-08-05", "date_to": "2026-09-09"},
+        "killed": True,
+        "thresholds": SHOW_FLAG.thresholds_fingerprint,
+        "findings": [
+            {
+                "type": "query_scan",
+                "kind": "no_event_filter",
+                "message": "This query read every event in its date range.",
+                "fix": "Add an event filter naming the events this question is about.",
+                "rows_read": 41_200,
+                "duration_ms": 19_000,
+            }
+        ],
+    }
+)
+
+
 class TestQueryScan(APIBaseTest):
     def setUp(self):
         super().setUp()
@@ -1357,27 +1383,12 @@ class TestQueryScan(APIBaseTest):
         patcher = mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=self.redis_client_mock)
         patcher.start()
         self.addCleanup(patcher.stop)
+        flag_patcher = mock.patch("posthog.api.query.get_query_scan_flag", return_value=SHOW_FLAG)
+        self.flag_mock = flag_patcher.start()
+        self.addCleanup(flag_patcher.stop)
 
     def test_returns_the_stored_scan(self):
-        self.redis_client_mock.get.return_value = json.dumps(
-            {
-                "version": 1,
-                "status": "done",
-                "events_in_range": 16_000,
-                "range": {"from": "2025-08-05", "to": "2026-09-09"},
-                "killed": True,
-                "findings": [
-                    {
-                        "type": "query_scan",
-                        "kind": "no_event_filter",
-                        "message": "This query read every event in its date range.",
-                        "fix": "Add an event filter naming the events this question is about.",
-                        "rows_read": 41_200,
-                        "duration_ms": 19_000,
-                    }
-                ],
-            }
-        )
+        self.redis_client_mock.get.return_value = A_STORED_SCAN
 
         response = self.client.get(f"/api/environments/{self.team.id}/query/cache_key_1/scan/")
 
@@ -1385,12 +1396,22 @@ class TestQueryScan(APIBaseTest):
         body = response.json()
         self.assertEqual(body["status"], "done")
         self.assertEqual(body["events_in_range"], 16_000)
-        self.assertEqual(body["range"], {"from": "2025-08-05", "to": "2026-09-09"})
+        self.assertEqual(body["range"], {"date_from": "2025-08-05", "date_to": "2026-09-09"})
         self.assertTrue(body["killed"])
         self.assertEqual([warning["kind"] for warning in body["warnings"]], ["no_event_filter"])
 
-    def test_returns_404_when_the_query_was_never_analyzed(self):
-        self.redis_client_mock.get.return_value = None
+    @parameterized.expand(
+        [
+            ("the query was never analyzed", None, SHOW_FLAG),
+            # `log_only` collects the analysis without showing it to anyone, so the endpoint that
+            # serves it to a client has to stay closed on that mode.
+            ("the team is in log-only mode", A_STORED_SCAN, LOG_ONLY_FLAG),
+            ("the flag is off", A_STORED_SCAN, None),
+        ]
+    )
+    def test_returns_404_when(self, _name, stored, flag):
+        self.redis_client_mock.get.return_value = stored
+        self.flag_mock.return_value = flag
 
         response = self.client.get(f"/api/environments/{self.team.id}/query/cache_key_1/scan/")
 

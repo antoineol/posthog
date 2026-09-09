@@ -10,7 +10,7 @@ failure drops the enqueue and reports a skip, never the query result.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal, TypeGuard
 
 import structlog
 from pydantic import BaseModel
@@ -21,19 +21,26 @@ from posthog.hogql.query_stats import QueryStats
 
 from posthog.clickhouse.query_tagging import get_query_tag_value, is_api_key_access_method
 from posthog.dataclasses import frozen
+from posthog.models.user import User
 from posthog.query_scan.flag import QueryScanFlag
 from posthog.query_scan.slot import (
+    claim_enqueue_budget,
     get as get_slot,
     set_pending,
 )
 
-if TYPE_CHECKING:
-    from posthog.models.user import User
-
 logger = structlog.get_logger(__name__)
 
 SkipReason = Literal[
-    "flag_off", "below_floor", "api_key", "no_principal", "not_cacheable", "slot_exists", "enqueue_failed"
+    "flag_off",
+    "below_floor",
+    "api_key",
+    "no_principal",
+    "not_cacheable",
+    "direct_connection",
+    "rate_limited",
+    "slot_exists",
+    "enqueue_failed",
 ]
 
 
@@ -46,6 +53,20 @@ class QueryScanTrigger:
 
 
 FLAG_OFF = QueryScanTrigger(triggered=False, skipped_reason="flag_off")
+NO_PRINCIPAL = QueryScanTrigger(triggered=False, skipped_reason="no_principal")
+
+
+def is_analyzable_principal(user: object) -> TypeGuard[User]:
+    """Whether the job can rebuild the run as the person who made it.
+
+    Only a real user row survives the trip to the worker. A shared-link viewer and a service
+    token bypass warehouse access control while the query runs but resolve to no user there,
+    and a run that had no principal at all is in the same position: a userless context fails
+    closed on every warehouse table, so the rebuild would be narrower than the run and could
+    only fail. The scan also describes the project's own data volume, which is why a run these
+    principals made gets no summary on its response either.
+    """
+    return isinstance(user, User)
 
 
 def _task_payload(model: BaseModel) -> dict[str, Any]:
@@ -87,16 +108,21 @@ def maybe_trigger_query_scan(
     if is_api_key_access_method(get_query_tag_value("access_method")):
         # An API caller has no surface to read the advice on, so analyzing costs without paying.
         return QueryScanTrigger(triggered=False, skipped_reason="api_key")
-    # A shared-link viewer and a service token both bypass warehouse access control while the
-    # query runs, and neither survives the trip to the worker: the job resolves no user at all,
-    # which fails closed on every warehouse table. The rebuild would be narrower than the run,
-    # so the analysis could only fail and park a pending slot until it expired.
-    user_id = user.id if user is not None else None
-    if user is not None and user_id is None:
-        return QueryScanTrigger(triggered=False, skipped_reason="no_principal")
+    if not is_analyzable_principal(user):
+        return NO_PRINCIPAL
+    if getattr(query, "connectionId", None):
+        # A direct connection reads the external warehouse instead of ClickHouse, so the job has
+        # nothing to explain or count and would park a pending slot for an analysis that cannot
+        # happen.
+        return QueryScanTrigger(triggered=False, skipped_reason="direct_connection")
     if not cacheable:
         return QueryScanTrigger(triggered=False, skipped_reason="not_cacheable")
     if get_slot(team_id, cache_key, thresholds=flag.thresholds_fingerprint) is not None:
+        return QueryScanTrigger(triggered=False, skipped_reason="slot_exists")
+    if not claim_enqueue_budget(team_id):
+        return QueryScanTrigger(triggered=False, skipped_reason="rate_limited")
+    if not set_pending(team_id, cache_key, killed=killed):
+        # Another slow run of the same query claimed the slot between the read above and here.
         return QueryScanTrigger(triggered=False, skipped_reason="slot_exists")
 
     # The query runner imports this module, and the task's job imports the query runner, so a
@@ -104,7 +130,6 @@ def maybe_trigger_query_scan(
     from posthog.tasks.query_scan import analyze_query_scan  # noqa: PLC0415
 
     try:
-        set_pending(team_id, cache_key, killed=killed)
         analyze_query_scan.delay(
             team_id=team_id,
             cache_key=cache_key,
@@ -115,7 +140,7 @@ def maybe_trigger_query_scan(
             rows_read=stats.rows_read,
             duration_ms=duration_ms,
             trigger=trigger,
-            user_id=user_id,
+            user_id=user.id,
             killed=killed,
             error_type=error_type,
         )

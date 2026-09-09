@@ -30,6 +30,11 @@ SLOT_VERSION = 1
 PENDING_TTL_SECONDS = 10 * 60
 DONE_TTL_SECONDS = 30 * 24 * 60 * 60
 
+# How many scans one project may enqueue per window. The job runs on a queue sized to protect
+# ClickHouse, so a project whose dashboards are all slow must not be able to fill it.
+ENQUEUE_CAP_PER_WINDOW = 10
+ENQUEUE_WINDOW_SECONDS = 60
+
 
 @frozen
 class QueryScanSlot:
@@ -52,6 +57,10 @@ class QueryScanSlot:
 
 def slot_key(team_id: int, cache_key: str) -> str:
     return f"query_scan:{team_id}:{cache_key}"
+
+
+def enqueue_counter_key(team_id: int) -> str:
+    return f"query_scan:enqueues:{team_id}"
 
 
 def get(team_id: int, cache_key: str, *, thresholds: str | None = None) -> QueryScanSlot | None:
@@ -80,25 +89,50 @@ def get(team_id: int, cache_key: str, *, thresholds: str | None = None) -> Query
         return None
 
 
-def set_pending(team_id: int, cache_key: str, *, killed: bool = False) -> None:
+def set_pending(team_id: int, cache_key: str, *, killed: bool = False) -> bool:
+    """Claim the slot for one job, and report whether this call is the one that claimed it.
+
+    The write is conditional, so two slow runs of the same query that both pass the read test
+    still enqueue one job: the loser is told the slot already exists.
+    """
     value: dict[str, Any] = {"status": "pending", "enqueued_at": _now()}
     if killed:
         # The scan endpoint answers from this slot until the job finishes and reports the field
         # straight, so a run ClickHouse stopped must not read as one that completed.
         value["killed"] = True
-    _write(team_id, cache_key, value, PENDING_TTL_SECONDS)
+    return _write(team_id, cache_key, value, PENDING_TTL_SECONDS, nx=True)
 
 
 def set_done(team_id: int, cache_key: str, slot: QueryScanSlot) -> None:
     _write(team_id, cache_key, _serialize(slot), DONE_TTL_SECONDS)
 
 
-def _write(team_id: int, cache_key: str, value: dict[str, Any], ttl_seconds: int) -> None:
+def claim_enqueue_budget(team_id: int) -> bool:
+    """Whether this project may enqueue another scan in the current window.
+
+    One dashboard refresh can produce hundreds of distinct slow queries, so without a cap a
+    single project can take the whole analytics queue. A Redis failure allows the enqueue,
+    because the slot claim that follows reads the same client and stops there instead.
+    """
+    try:
+        client = query_cache_raw_client()
+        key = enqueue_counter_key(team_id)
+        count = client.incr(key)
+        if count == 1:
+            client.expire(key, ENQUEUE_WINDOW_SECONDS)
+        return count <= ENQUEUE_CAP_PER_WINDOW
+    except Exception:
+        logger.warning("query_scan_enqueue_budget_failed", team_id=team_id, exc_info=True)
+        return True
+
+
+def _write(team_id: int, cache_key: str, value: dict[str, Any], ttl_seconds: int, *, nx: bool = False) -> bool:
     try:
         payload = json.dumps({"version": SLOT_VERSION, **value})
-        query_cache_raw_client().set(slot_key(team_id, cache_key), payload, ex=ttl_seconds)
+        return bool(query_cache_raw_client().set(slot_key(team_id, cache_key), payload, ex=ttl_seconds, nx=nx))
     except Exception:
         logger.warning("query_scan_slot_write_failed", team_id=team_id, exc_info=True)
+        return False
 
 
 def _now() -> str:

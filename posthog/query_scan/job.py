@@ -14,8 +14,9 @@ from time import perf_counter
 from typing import Any
 
 import structlog
+from dateutil.relativedelta import relativedelta
 
-from posthog.schema import HogQLFilters, HogQLQueryModifiers, QueryScanRange, QueryScanStatus
+from posthog.schema import HogQLFilters, HogQLQueryModifiers, PersonsOnEventsMode, QueryScanRange, QueryScanStatus
 
 from posthog.hogql.constants import LimitContext
 from posthog.hogql.context import HogQLContext
@@ -31,6 +32,7 @@ from posthog.event_usage import groups
 from posthog.exceptions_capture import capture_exception
 from posthog.hogql_queries.hogql_query_runner import HogQLQueryRunner
 from posthog.hogql_queries.query_runner import QueryRunner, get_query_runner
+from posthog.models.team.event_retention import events_retention_months_for_team
 from posthog.models.team.team import Team
 from posthog.models.user import User
 from posthog.ph_client import ph_scoped_capture
@@ -80,6 +82,7 @@ class _Analysis:
     events_in_range: int | None
     person_rows: int | None = None
     min_timestamp: datetime | None = None
+    retention_months: int | None = None
 
 
 def run_query_scan(job: QueryScanJob) -> None:
@@ -128,7 +131,7 @@ def _run(job: QueryScanJob, started: float) -> None:
             rows_read=job.rows_read,
             duration_ms=job.duration_ms,
             events_in_range=analysis.events_in_range,
-            range=_slot_range(analysis.result.range, analysis.min_timestamp),
+            range=_slot_range(analysis.result.range, analysis.min_timestamp, analysis.retention_months),
             explain_ok=analysis.result.explain_ok,
             findings=tuple(analysis.result.findings),
             killed=job.killed,
@@ -165,14 +168,20 @@ def _analyze_hogql(runner: HogQLQueryRunner, job: QueryScanJob, thresholds: Scan
     # would use one is already quiet, and the project's whole event count is not what such a
     # query read, so counting it would only store a ratio that means nothing.
     reads_events = bool(find_events_reads(prepared_tree))
+    retention_months = events_retention_months_for_team(job.team, job.team.pk)
     counted = (
-        _count_events_in_range(job.team, start_date.date_from, start_date.date_to)
+        _count_events_in_range(
+            job.team,
+            start_date.date_from,
+            start_date.date_to,
+            lower=start_date.lower,
+            upper=start_date.upper,
+            retention_months=retention_months,
+        )
         if reads_events
         else _EventCount(events=None)
     )
-    # The person count only decides the gate on an unfiltered join, so a query that pushes a
-    # filter into the subquery, or never joins persons at all, skips it.
-    person_rows = _count_person_rows(job.team) if check_persons_join(clickhouse_context).unfiltered else None
+    person_rows = _person_rows_for_gate(job, clickhouse_context)
 
     result = analyze(
         prepared_tree,
@@ -192,15 +201,43 @@ def _analyze_hogql(runner: HogQLQueryRunner, job: QueryScanJob, thresholds: Scan
         events_in_range=counted.events,
         person_rows=person_rows,
         min_timestamp=counted.min_timestamp,
+        retention_months=retention_months,
     )
+
+
+def _person_rows_for_gate(job: QueryScanJob, clickhouse_context: HogQLContext) -> int | None:
+    """Person versions for the project, or None when the persons finding cannot fire anyway.
+
+    The count only decides the gate on an unfiltered join, so a query that pushes a filter into
+    the subquery, or never joins persons at all, does not need it. With persons-on-events off
+    there is nothing to advise either: the finding tells the person to read person properties
+    from the events table, and that mode does not put them there.
+    """
+    if job.team.person_on_events_mode == PersonsOnEventsMode.DISABLED:
+        return None
+    if not check_persons_join(clickhouse_context).unfiltered:
+        return None
+    return _count_person_rows(job.team)
 
 
 def _analyze_settings(runner: QueryRunner, job: QueryScanJob, thresholds: ScanThresholds) -> _Analysis:
     resolved = _resolved_date_range(runner)
     date_from, date_to = resolved.date_from, resolved.date_to
+    retention_months = events_retention_months_for_team(job.team, job.team.pk)
     # Without a resolved range there is nothing to measure the read against, and the only check
     # that would still fire needs a date range on the insight to fire at all.
-    counted = _count_events_in_range(job.team, date_from, date_to) if date_to is not None else _EventCount(events=None)
+    counted = (
+        _count_events_in_range(
+            job.team,
+            date_from,
+            date_to,
+            lower=resolved.lower,
+            upper=resolved.upper,
+            retention_months=retention_months,
+        )
+        if date_to is not None
+        else _EventCount(events=None)
+    )
 
     result = analyze_settings(
         runner.query.model_dump(mode="json"),
@@ -212,22 +249,37 @@ def _analyze_settings(runner: QueryRunner, job: QueryScanJob, thresholds: ScanTh
         events_in_range=counted.events,
         thresholds=thresholds,
     )
-    return _Analysis(result=result, events_in_range=counted.events, min_timestamp=counted.min_timestamp)
+    return _Analysis(
+        result=result,
+        events_in_range=counted.events,
+        min_timestamp=counted.min_timestamp,
+        retention_months=retention_months,
+    )
 
 
 @frozen
 class _ResolvedDateRange:
+    """The range a picker-built insight resolved to: the dates for the copy, and the exact
+    instants for the count, ``upper`` exclusive."""
+
     date_from: date | None
     date_to: date | None
+    lower: datetime | None = None
+    upper: datetime | None = None
 
 
 def _resolved_date_range(runner: QueryRunner) -> _ResolvedDateRange:
-    """The dates the runner resolved for the insight, which is where a picker-built query says
+    """The range the runner resolved for the insight, which is where a picker-built query says
     what it covers. Runners without one report no range."""
     query_date_range = getattr(runner, "query_date_range", None)
     if query_date_range is None:
         return _ResolvedDateRange(date_from=None, date_to=None)
-    return _ResolvedDateRange(date_from=query_date_range.date_from().date(), date_to=query_date_range.date_to().date())
+    lower = query_date_range.date_from()
+    # The resolved end is the last instant the insight reads, so the exclusive bound sits just after it.
+    upper = query_date_range.date_to() + timedelta(microseconds=1)
+    return _ResolvedDateRange(
+        date_from=lower.date(), date_to=query_date_range.date_to().date(), lower=lower, upper=upper
+    )
 
 
 def _has_open_filters_placeholder(query: str, filters: HogQLFilters | None) -> bool:
@@ -272,19 +324,40 @@ def _explain(sql: str, context: HogQLContext, team: Team) -> QueryPlan | None:
         return None
 
 
-def _count_events_in_range(team: Team, date_from: date | None, date_to: date | None) -> _EventCount:
+def _count_events_in_range(
+    team: Team,
+    date_from: date | None,
+    date_to: date | None,
+    *,
+    lower: datetime | None = None,
+    upper: datetime | None = None,
+    retention_months: int | None,
+) -> _EventCount:
     """How many events the project holds over the range the query read.
 
     The events table is sorted by team and day, so this reads the key columns for the project's
-    granules in range and nothing else. A missing bound is left out of the filter, and the
-    earliest timestamp stands in for a missing lower bound in the copy.
+    granules in range and nothing else. The exact instants are used where the query gave them, so
+    an explicit range is not counted a day wide; the day-rounded dates stand in when only they are
+    known. A missing bound is left out of the filter, and the earliest timestamp stands in for a
+    missing lower bound in the copy.
     """
     conditions = ["team_id = %(team_id)s"]
     arguments: dict[str, Any] = {"team_id": team.pk}
-    if date_from is not None:
+    if retention_months is not None:
+        # The number reaches the person, and the printer floors every events scan the same way,
+        # so counting past the floor would report events the query itself can no longer read.
+        conditions.append("timestamp > now() - toIntervalMonth(%(retention_months)s)")
+        arguments["retention_months"] = retention_months
+    if lower is not None:
+        conditions.append("timestamp >= %(date_from)s")
+        arguments["date_from"] = lower
+    elif date_from is not None:
         conditions.append("timestamp >= %(date_from)s")
         arguments["date_from"] = date_from
-    if date_to is not None:
+    if upper is not None:
+        conditions.append("timestamp < %(date_to)s")
+        arguments["date_to"] = upper
+    elif date_to is not None:
         conditions.append("timestamp < %(date_to)s")
         # The range is rounded out to whole days, so the exclusive bound is the day after it.
         arguments["date_to"] = date_to + timedelta(days=1)
@@ -319,7 +392,9 @@ def _count_person_rows(team: Team) -> int:
     return rows[0][0]
 
 
-def _slot_range(scan_range: ScanRange | None, min_timestamp: datetime | None) -> QueryScanRange | None:
+def _slot_range(
+    scan_range: ScanRange | None, min_timestamp: datetime | None, retention_months: int | None
+) -> QueryScanRange | None:
     if scan_range is None or scan_range.date_to is None:
         return None
     # With no start date the count covered everything the project has, so the earliest event it
@@ -327,7 +402,19 @@ def _slot_range(scan_range: ScanRange | None, min_timestamp: datetime | None) ->
     date_from = scan_range.date_from or (min_timestamp.date() if min_timestamp is not None else None)
     if date_from is None:
         return None
-    return QueryScanRange.model_validate({"from": date_from.isoformat(), "to": scan_range.date_to.isoformat()})
+    floor = _retention_floor_date(retention_months)
+    if floor is not None and date_from < floor:
+        # The count stopped at the retention floor, so a wider range here would put that number
+        # next to days it does not cover.
+        date_from = floor
+    return QueryScanRange(date_from=date_from.isoformat(), date_to=scan_range.date_to.isoformat())
+
+
+def _retention_floor_date(retention_months: int | None) -> date | None:
+    """The day the team's events retention starts, for the copy the person reads."""
+    if retention_months is None:
+        return None
+    return (datetime.now(UTC) - relativedelta(months=retention_months)).date()
 
 
 def _report(job: QueryScanJob, analysis: _Analysis, *, query_kind: str | None, job_ms: int) -> None:

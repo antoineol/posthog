@@ -1,15 +1,16 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from posthog.test.base import BaseTest
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
+from dateutil.relativedelta import relativedelta
 from parameterized import parameterized
 
-from posthog.schema import DateRange, HogQLFilters
+from posthog.schema import DateRange, HogQLFilters, PersonsOnEventsMode
 
 from posthog.query_scan import slot
 from posthog.query_scan.flag import QueryScanFlag
@@ -29,7 +30,7 @@ class TestQueryScanJob(BaseTest):
         self.stored: dict[str, Any] = {}
         redis = mock.Mock()
         redis.get.side_effect = lambda key: self.stored.get(key)
-        redis.set.side_effect = lambda key, value, ex=None: self.stored.__setitem__(key, value)
+        redis.set.side_effect = lambda key, value, ex=None, nx=False: self.stored.__setitem__(key, value)
         patcher = mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=redis)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -118,6 +119,7 @@ class TestQueryScanJob(BaseTest):
             (
                 "no events and a filtered persons join",
                 "select count() from persons where properties.email = 'a@b.c'",
+                None,
                 False,
                 False,
             ),
@@ -125,19 +127,79 @@ class TestQueryScanJob(BaseTest):
             (
                 "events joined to every person",
                 "select count() from events as e join persons as p on e.person_id = p.id where e.event = 'purchase'",
+                None,
                 True,
                 True,
+            ),
+            # The persons finding tells the person to read person properties off the events
+            # table, which this mode does not fill, so there is no advice the count could gate.
+            (
+                "an unfiltered join with persons on events off",
+                "select count() from events as e join persons as p on e.person_id = p.id where e.event = 'purchase'",
+                PersonsOnEventsMode.DISABLED,
+                True,
+                False,
             ),
         ]
     )
     def test_a_count_runs_only_when_a_check_consumes_it(
-        self, _name: str, sql: str, expect_events_count: bool, expect_person_count: bool
+        self,
+        _name: str,
+        sql: str,
+        person_on_events_mode: PersonsOnEventsMode | None,
+        expect_events_count: bool,
+        expect_person_count: bool,
     ) -> None:
+        if person_on_events_mode is not None:
+            self.team.modifiers = {"personsOnEventsMode": person_on_events_mode.value}
+            self.team.save()
+
         executed = self._run(sql=sql)
 
         counts = [query for query in executed if not query.startswith("EXPLAIN")]
         assert any("min(timestamp)" in query for query in counts) is expect_events_count
         assert any("FROM person " in query for query in counts) is expect_person_count
+
+    def test_the_event_count_uses_the_exact_bounds_the_query_gave(self) -> None:
+        # Rounding an explicit range out to whole days would count a day the query never read and
+        # understate the ratio, so the count takes the instants the bounds evaluated to.
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        def execute(query: str, arguments: Any = None, *args: Any, **kwargs: Any) -> Any:
+            calls.append((query, arguments or {}))
+            if query.startswith("EXPLAIN"):
+                return [[(FIXTURES / "no_event_filter.json").read_text()]]
+            if "min(timestamp)" in query:
+                return [(EVENTS_IN_RANGE, datetime(2026, 1, 10, 8))]
+            return [(200_000,)]
+
+        with mock.patch("posthog.query_scan.job.sync_execute", side_effect=execute):
+            run_query_scan(
+                self._job(
+                    sql="select count() from events where timestamp >= '2026-01-10 08:00:00' "
+                    "and timestamp < '2026-01-12 18:30:00'"
+                )
+            )
+
+        _query, arguments = next(call for call in calls if "min(timestamp)" in call[0])
+        assert arguments["date_from"] == datetime(2026, 1, 10, 8, 0)
+        assert arguments["date_to"] == datetime(2026, 1, 12, 18, 30)
+
+    @override_settings(EVENTS_DATA_RETENTION_ENFORCED=True)
+    def test_the_event_count_stops_at_the_retention_floor(self) -> None:
+        # The count is shown to the person, and the printer floors every events scan the same
+        # way, so counting past the floor would report events their query can no longer read.
+        self.team.event_retention_months = 12
+        self.team.save()
+
+        executed = self._run(sql="select count() from events where timestamp > '2019-01-01'")
+
+        count_sql = next(query for query in executed if "min(timestamp)" in query)
+        assert "toIntervalMonth(%(retention_months)s)" in count_sql
+        stored = slot.get(self.team.pk, "cache_key_1")
+        assert stored is not None
+        assert stored.range is not None
+        assert stored.range.date_from == (datetime.now(UTC) - relativedelta(months=12)).date().isoformat()
 
     def test_a_failed_explain_still_writes_a_done_slot(self) -> None:
         self._run(explain=Exception("EXPLAIN timed out"))

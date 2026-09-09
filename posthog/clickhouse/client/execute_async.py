@@ -314,9 +314,12 @@ def execute_process_query(
         )
         # A run ClickHouse stopped carries its scan, so a dead tile can show the advice next to
         # the failure. The job finishes after this status is stored, which is why the cache key
-        # rides along: the reader polls the slot for it.
-        query_status.cache_key = getattr(err, "cache_key", None)
-        query_status.query_scan = _query_scan_from_error(err)
+        # rides along: the reader polls the slot for it. Only for a run a real user made: a
+        # shared-link run is read from outside the project, and the scan describes the project's
+        # own data volume.
+        if user_id:
+            query_status.cache_key = getattr(err, "cache_key", None)
+            query_status.query_scan = _query_scan_from_error(err)
         if is_user_safe_error or is_staff_user:
             # We can only expose the error message if it's a known safe error OR if the user is PostHog staff
             query_status.error_message = str(err)

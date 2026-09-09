@@ -13,6 +13,7 @@ from posthog.schema import EventsNode, FunnelsQuery, HogQLQuery, TrendsQuery
 from posthog.hogql.query_stats import QueryStats
 
 from posthog.clickhouse.query_tagging import AccessMethod, reset_query_tags, tag_queries
+from posthog.models.user import User
 from posthog.query_scan.flag import QueryScanFlag
 from posthog.query_scan.trigger import maybe_trigger_query_scan
 from posthog.shared_link_user import SharedLinkUser
@@ -34,11 +35,22 @@ def _store_a_slot(test: "TestQueryScanTrigger", thresholds: str = FLAG.threshold
     test.redis.get.return_value = json.dumps({"version": 1, "status": "done", "findings": [], "thresholds": thresholds})
 
 
+def _spend_the_enqueue_budget(test: "TestQueryScanTrigger") -> None:
+    test.redis.incr.return_value = 11
+
+
+def _lose_the_slot_claim(test: "TestQueryScanTrigger") -> None:
+    # `SET NX` returns nothing when the key is already there, which is how a second run of the
+    # same query learns that the first one claimed the slot.
+    test.redis.set.return_value = None
+
+
 class TestQueryScanTrigger(SimpleTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.redis = mock.Mock()
         self.redis.get.return_value = None
+        self.redis.incr.return_value = 1
         patcher = mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=self.redis)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -58,7 +70,7 @@ class TestQueryScanTrigger(SimpleTestCase):
             "insight_id": None,
             "dashboard_id": None,
             "trigger": "fresh",
-            "user": None,
+            "user": User(id=7),
             "cacheable": True,
         }
         return maybe_trigger_query_scan(**{**arguments, **overrides})
@@ -69,8 +81,16 @@ class TestQueryScanTrigger(SimpleTestCase):
             ("below the floor", {"stats": QueryStats(rows_read=10, duration_ms=999.0)}, None, "below_floor"),
             ("api key run", {}, _tag_as_api_key, "api_key"),
             ("shared link viewer", {"user": _shared_link_user()}, None, "no_principal"),
+            ("no principal at all", {"user": None}, None, "no_principal"),
+            (
+                "direct connection",
+                {"query": HogQLQuery(query="select 1", connectionId="connection_1")},
+                None,
+                "direct_connection",
+            ),
             ("result not cacheable", {"cacheable": False}, None, "not_cacheable"),
             ("slot already exists", {}, _store_a_slot, "slot_exists"),
+            ("over the enqueues a team gets in a minute", {}, _spend_the_enqueue_budget, "rate_limited"),
         ]
     )
     def test_skips_with_a_reason(self, _name, overrides, prepare, expected_reason) -> None:
@@ -83,6 +103,17 @@ class TestQueryScanTrigger(SimpleTestCase):
         assert result.skipped_reason == expected_reason
         self.delay.assert_not_called()
         self.redis.set.assert_not_called()
+
+    def test_a_lost_slot_claim_does_not_enqueue_a_second_job(self) -> None:
+        # Two slow runs of the same query can both find no slot, so the conditional write is what
+        # keeps one job per slot; without it the loser would enqueue a duplicate analysis.
+        _lose_the_slot_claim(self)
+
+        result = self._trigger()
+
+        assert result.triggered is False
+        assert result.skipped_reason == "slot_exists"
+        self.delay.assert_not_called()
 
     def test_a_broker_failure_does_not_fail_the_query(self) -> None:
         # ClickHouse has already done the work and the result is not cached yet, so an optional
@@ -130,6 +161,7 @@ class TestQueryScanTrigger(SimpleTestCase):
         assert enqueued["rows_read"] == 10
         assert enqueued["duration_ms"] == 2000
         assert enqueued["trigger"] == "fresh"
+        assert enqueued["user_id"] == 7
         # The job rebuilds the query from this payload, so it has to validate back unchanged.
         assert type(query).model_validate(enqueued["query"]) == query
 
@@ -137,3 +169,7 @@ class TestQueryScanTrigger(SimpleTestCase):
         assert key == "query_scan:1:cache_key_1"
         assert json.loads(payload)["status"] == "pending"
         assert self.redis.set.call_args.kwargs["ex"] == 600
+        assert self.redis.set.call_args.kwargs["nx"] is True
+        # Without the window the first minute's count would stand forever and cap the team for
+        # good.
+        self.redis.expire.assert_called_once_with("query_scan:enqueues:1", 60)

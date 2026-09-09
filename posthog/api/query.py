@@ -269,8 +269,8 @@ class QueryScanResponseSerializer(serializers.Serializer):
             "type": "object",
             "nullable": True,
             "properties": {
-                "from": {"type": "string", "format": "date"},
-                "to": {"type": "string", "format": "date"},
+                "date_from": {"type": "string", "format": "date"},
+                "date_to": {"type": "string", "format": "date"},
             },
         }
     )
@@ -636,9 +636,13 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
     )
     @action(methods=["GET"], detail=True, url_path="scan", required_scopes=["query:read"])
     def get_query_scan(self, request: Request, pk: str, *args, **kwargs) -> Response:
-        # With the flag off there is no current configuration to hold the stored analysis to.
+        # `log_only` collects the analysis without showing it to anyone, and with the flag off
+        # there is no current configuration to hold a stored analysis to. Either way this
+        # endpoint has nothing it may serve.
         flag = get_query_scan_flag(self.team)
-        slot = query_scan_slot.get(self.team_id, pk, thresholds=flag.thresholds_fingerprint if flag else None)
+        if flag is None or flag.mode != "show":
+            raise NotFound("There is no query scan for this cache key.")
+        slot = query_scan_slot.get(self.team_id, pk, thresholds=flag.thresholds_fingerprint)
         if slot is None:
             raise NotFound("There is no query scan for this cache key.")
         return Response(
