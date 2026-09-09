@@ -58,6 +58,7 @@ from products.signals.backend.task_run_artefacts import (
     record_implementation_task,
 )
 from products.tasks.backend.facade import api as tasks_facade
+from products.tasks.backend.facade.billing import get_report_triggering_signal_id
 
 logger = structlog.get_logger(__name__)
 
@@ -380,6 +381,7 @@ def _create_implementation_task_if_absent(
     base_branch: str | None,
     billing_exempt_reason: str | None = None,
     steering: ReportSteering = NO_STEERING,
+    triggering_signal_id: str | None = None,
 ) -> bool:
     """Create the implementation task and record it (gate row + work-log artefact), serialized per report.
 
@@ -396,6 +398,7 @@ def _create_implementation_task_if_absent(
     """
     # Resolved outside the transaction: the flag read does network I/O and must not hold the row lock.
     agent_runtime = resolve_agent_runtime(team_id, STEP_IMPLEMENTATION)
+    triggering_signal_id = triggering_signal_id or get_report_triggering_signal_id(team_id=team_id, report_id=report_id)
 
     head_branch = _generate_self_driving_head_branch(title)
     description = description + _head_branch_instruction(head_branch)
@@ -429,6 +432,7 @@ def _create_implementation_task_if_absent(
             repository=repository,
             branch=base_branch,
             signal_report_id=report_id,
+            triggering_signal_id=triggering_signal_id,
             # `full` scopes so the implementation agent can log its work on the report (notes,
             # code references) via the task:write artefact tools, plus the scratchpad so what it
             # learned about the codebase outlives the run.
@@ -664,6 +668,7 @@ async def maybe_autostart_implementation_task(
     triggering_user_id: int | None = None,
     billing_exempt_reason: str | None = None,
     repository_autostart_eligible: bool = True,
+    triggering_signal_id: str | None = None,
 ) -> None:
     """Start an implementation Task for a SignalReport if autonomy + priority allow it.
 
@@ -825,6 +830,7 @@ async def maybe_autostart_implementation_task(
         base_branch=base_branch,
         billing_exempt_reason=billing_exempt_reason,
         steering=steering,
+        triggering_signal_id=triggering_signal_id,
     )
     if not created:
         # Another evaluation won the race and already created the implementation task.
@@ -887,7 +893,9 @@ async def _latest_reviewers_content(report_id: str) -> tuple[list[ReviewerConten
     return reviewers, editor_user_id
 
 
-async def maybe_autostart_from_report_artefacts(*, team_id: int, report_id: str) -> None:
+async def maybe_autostart_from_report_artefacts(
+    *, team_id: int, report_id: str, triggering_signal_id: str | None = None
+) -> None:
     """Re-evaluate auto-start from a report's *current* artefacts.
 
     Called when reviewers change after the report was created (e.g. a human edits them via the
@@ -954,4 +962,5 @@ async def maybe_autostart_from_report_artefacts(*, team_id: int, report_id: str)
         # which would let one user act under another's PostHog identity (reviewer impersonation).
         triggering_user_id=editor_user_id,
         repository_autostart_eligible=repo_selection.autostart_eligible,
+        triggering_signal_id=triggering_signal_id,
     )
