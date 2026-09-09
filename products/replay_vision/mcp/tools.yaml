@@ -572,6 +572,9 @@ tools:
     vision-scanners-prompt-suggestions-list:
         operation: vision_scanners_prompt_suggestions_list
         enabled: false
+    vision-scanners-recent-observations-retrieve:
+        operation: vision_scanners_recent_observations_retrieve
+        enabled: false
     vision-scanners-scan-session:
         operation: vision_scanners_observe_create
         enabled: true
