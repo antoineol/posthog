@@ -9,6 +9,7 @@ import type { SignalReport } from "@posthog/shared/types";
 import { InboxDetailFrame } from "@posthog/ui/features/inbox/components/InboxDetailFrame";
 import { InboxReportCopyLinkMenu } from "@posthog/ui/features/inbox/components/InboxReportCopyLinkMenu";
 import { InboxReportDetailGate } from "@posthog/ui/features/inbox/components/InboxReportDetailGate";
+import { ReportTrackerIssueLink } from "@posthog/ui/features/inbox/components/utils/ReportTrackerIssueLink";
 import {
   type InboxBackTarget,
   useInboxBackTarget,
@@ -79,6 +80,7 @@ function DismissedReportDetailContent({
       backLabel={back.label}
       fallbackTitle="Untitled report"
       showDismiss={false}
+      metaSuffix={<ReportTrackerIssueLink report={report} />}
       primaryAction={
         <>
           {canRestore && <RestoreReportButton report={report} />}
