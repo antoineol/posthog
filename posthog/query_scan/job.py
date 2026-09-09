@@ -44,7 +44,10 @@ from posthog.query_scan.tree import find_events_reads
 
 logger = structlog.get_logger(__name__)
 
-COUNT_MAX_EXECUTION_TIME_SECONDS = 60
+# Every ClickHouse read this job makes carries it. `sync_execute` sets no cap of its own, and
+# the production socket waits effectively forever, so without this a statement ClickHouse does
+# not return holds a slot on a queue sized to protect ClickHouse.
+MAX_EXECUTION_TIME_SECONDS = 60
 
 
 @frozen
@@ -257,6 +260,7 @@ def _explain(sql: str, context: HogQLContext, team: Team) -> QueryPlan | None:
             rows = sync_execute(
                 f"EXPLAIN indexes = 1, json = 1 {sql}",
                 context.values,
+                settings={"max_execution_time": MAX_EXECUTION_TIME_SECONDS},
                 workload=Workload.OFFLINE,
                 team_id=team.pk,
                 readonly=True,
@@ -291,7 +295,7 @@ def _count_events_in_range(team: Team, date_from: date | None, date_to: date | N
         rows = sync_execute(
             sql,
             arguments,
-            settings={"max_execution_time": COUNT_MAX_EXECUTION_TIME_SECONDS},
+            settings={"max_execution_time": MAX_EXECUTION_TIME_SECONDS},
             workload=Workload.OFFLINE,
             team_id=team.pk,
             readonly=True,
@@ -307,7 +311,7 @@ def _count_person_rows(team: Team) -> int:
         rows = sync_execute(
             "SELECT count() FROM person WHERE team_id = %(team_id)s",
             {"team_id": team.pk},
-            settings={"max_execution_time": COUNT_MAX_EXECUTION_TIME_SECONDS},
+            settings={"max_execution_time": MAX_EXECUTION_TIME_SECONDS},
             workload=Workload.OFFLINE,
             team_id=team.pk,
             readonly=True,
