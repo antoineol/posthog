@@ -335,6 +335,7 @@ rules:
                               |SignalReportAssignment
                               |SignalReportRefund
                               |SignalReportTask
+                              |SignalReportTrackerIssue
                               |SignalRepositoryAreaActivity
                               |SignalTeamConfig
                               |SignalSourceConfig
@@ -731,6 +732,7 @@ rules:
                         |SignalReportAssignment
                         |SignalReportRefund
                         |SignalReportTask
+                        |SignalReportTrackerIssue
                         |SignalRepositoryAreaActivity
                         |SignalTeamConfig
                         |SignalSourceConfig
