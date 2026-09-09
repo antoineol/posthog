@@ -76432,8 +76432,8 @@ export namespace Schemas {
      * @nullable
      */
     export type QueryScanResponseRange = {
-      readonly from?: string;
-      readonly to?: string;
+      readonly date_from?: string;
+      readonly date_to?: string;
     } | null;
 
     /**
