@@ -1,6 +1,6 @@
 import re
 from time import perf_counter
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from django.core.cache import cache
 from django.http import JsonResponse
@@ -104,6 +104,15 @@ def _add_query_cost_headers(response: HttpResponseBase, bytes_read: int, remaini
     response["X-PostHog-Query-Bytes-Read"] = str(bytes_read)
     if remaining_bytes is not None:
         response["X-PostHog-Query-Budget-Remaining-Bytes"] = str(remaining_bytes)
+
+
+def _scan_extra(error: Exception) -> dict[str, Any]:
+    """The scan a stopped run left on the exception, ready to put on the response.
+
+    The killed-run path sets these as plain attributes, and the error serializer reads only
+    ``extra``, so an error that does not pass through here reaches the caller without them.
+    """
+    return {key: value for key in ("cache_key", "query_scan") if (value := getattr(error, key, None)) is not None}
 
 
 def _extract_validation_code(error: ValidationError) -> str:
@@ -440,9 +449,7 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
                 detail, extra = enrich_hogql_validation_error(query, self.team, request_user, detail)
             # A run ClickHouse stopped carries its scan, so the client can show the advice under
             # the error instead of only the failure.
-            scan_extra = {
-                key: value for key in ("cache_key", "query_scan") if (value := getattr(e, key, None)) is not None
-            }
+            scan_extra = _scan_extra(e)
             if scan_extra:
                 extra = {**(extra or {}), **scan_extra}
             validation_error = ValidationError(detail, getattr(e, "code_name", None))
@@ -452,7 +459,11 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
         except InternalCHQueryError as e:
             self.handle_column_ch_error(e)
             capture_exception(e)
-            raise APIException("ClickHouse error while executing query.")
+            replacement = APIException("ClickHouse error while executing query.")
+            scan_extra = _scan_extra(e)
+            if scan_extra:
+                replacement.extra = scan_extra  # type: ignore[attr-defined]
+            raise replacement
         except UserAccessControlError as e:
             raise ValidationError(str(e))
         except ResolutionError as e:
@@ -474,6 +485,11 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
             # Breaker replays were already captured when the original failure happened.
             if not getattr(e, "served_from_query_failure_cache", False):
                 capture_exception(e)
+            # The timeout and memory-limit classes land here, and they are the runs the scan
+            # exists for, so the advice has to reach the body on this path too.
+            scan_extra = _scan_extra(e)
+            if scan_extra:
+                e.extra = {**(getattr(e, "extra", None) or {}), **scan_extra}  # type: ignore[attr-defined]
             raise
 
     @extend_schema(
