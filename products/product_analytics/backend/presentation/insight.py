@@ -1444,6 +1444,7 @@ class InsightSerializer(InsightBasicSerializer):
                 return self._degraded_insight_result(
                     insight,
                     dashboard,
+                    error=e,
                     error_message=str(e),
                     error_code=getattr(e, "code_name", None),
                     last_refresh=None,
@@ -1455,6 +1456,7 @@ class InsightSerializer(InsightBasicSerializer):
                 return self._degraded_insight_result(
                     insight,
                     dashboard,
+                    error=e,
                     error_message="concurrency_limit_exceeded",
                     error_code="concurrency_limit_exceeded",
                     last_refresh=now(),
@@ -1465,6 +1467,7 @@ class InsightSerializer(InsightBasicSerializer):
                 return self._degraded_insight_result(
                     insight,
                     dashboard,
+                    error=e,
                     error_message=str(e),
                     error_code=None,
                     last_refresh=None,
@@ -1475,13 +1478,18 @@ class InsightSerializer(InsightBasicSerializer):
         insight: Insight,
         dashboard: Any,
         *,
+        error: Exception,
         error_message: str,
         error_code: str | None,
         last_refresh: datetime | None,
     ) -> InsightResult:
         """A 200 response carrying the failure on query_status, so a failing insight degrades in
         place rather than failing the whole request. `error_code` lets the client tell a
-        deterministic query failure from a transient one."""
+        deterministic query failure from a transient one.
+
+        A run ClickHouse stopped carries its scan on the exception, and the analysis is stored
+        under the cache key, so both ride along instead of being dropped with the results."""
+        query_scan = getattr(error, "query_scan", None)
         return InsightResult(
             result=None,
             last_refresh=last_refresh,
@@ -1500,7 +1508,8 @@ class InsightSerializer(InsightBasicSerializer):
                     error=True,
                 )
             ),
-            cache_key=None,
+            cache_key=getattr(error, "cache_key", None),
+            query_scan=query_scan if isinstance(query_scan, dict) else None,
             hogql=None,
             columns=None,
             has_more=None,
