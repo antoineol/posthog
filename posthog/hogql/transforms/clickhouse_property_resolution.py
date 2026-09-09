@@ -28,7 +28,7 @@ from posthog.hogql import ast
 from posthog.hogql.base import _T_AST
 from posthog.hogql.context import HogQLContext
 from posthog.hogql.database.models import DatabaseField, MapStringDatabaseField
-from posthog.hogql.errors import QueryError
+from posthog.hogql.errors import ImpossibleASTError, QueryError
 from posthog.hogql.functions.mapping import HOGQL_COMPARISON_MAPPING
 from posthog.hogql.printer.base import resolve_field_type
 from posthog.hogql.printer.clickhouse import AI_BLOOM_FILTER_PROPERTIES, COLUMNS_WITH_HACKY_OPTIMIZED_NULL_HANDLING
@@ -1065,8 +1065,9 @@ class ClickHousePropertyResolver(CloningVisitor):
         source = resolve_json_subcolumn_source(
             field_type, table_type.table.to_printed_clickhouse(self.context), field.name, first_key, self.context
         )
-        if source is None:
-            return None
+        # Every key on the JSON tables resolves to a declared or Dynamic subcolumn. Leaving the call on the blob
+        # would serialize the whole document per row, so a missing source is a bug, not a fallback.
+        assert source is not None
 
         if len(node.args) > 2:
             json_value = _json_subcolumn_value_expr(
@@ -1105,9 +1106,11 @@ class ClickHousePropertyResolver(CloningVisitor):
                     _call("notEquals", [object_value, _sentinel("{}")]),
                 ],
             )
-        if source.is_nullable or _is_dynamic_json_source(source):
+        if source.is_nullable:
             return _call("isNotNull", [subcolumn])
-        if _is_string_array_column(source):
+        # A non-nullable declared path stores its type default when the property is missing, so presence is
+        # "not the default": non-empty for arrays, maps, and tuples, and non-empty text for strings.
+        if _is_json_container_column(source):
             return _call("notEmpty", [subcolumn])
         if _is_string_column(source):
             return ast.Call(
@@ -1115,7 +1118,9 @@ class ClickHousePropertyResolver(CloningVisitor):
                 args=[_call("length", [subcolumn]), _const(0)],
                 type=ast.BooleanType(nullable=False),
             )
-        return None
+        raise ImpossibleASTError(
+            f"JSONHas has no presence rule for the declared JSON path type {source.column_type!r} ({first_key})"
+        )
 
     def visit_compare_operation(self, node: ast.CompareOperation) -> ast.Expr:
         # Try each skip-index comparison rewrite in order. Each one consumes the property operand and returns the

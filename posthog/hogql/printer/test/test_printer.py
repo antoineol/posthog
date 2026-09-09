@@ -1403,6 +1403,8 @@ class TestPrinter(BaseTest):
             "JSONHas(properties, 'dynamic_key')": "or(isNotNull(events.properties.dynamic_key), notEquals(toJSONString(events.properties.^dynamic_key), '{}'))",
             "JSONHas(properties, '$ai_trace_id')": "notEquals(length(events.properties.`$ai_trace_id`), 0)",
             "JSONHas(properties, '$browser')": "ifNull(notEquals(length(events.properties.`$browser`), 0), 1)",
+            "JSONHas(properties, '$exception_list')": "notEmpty(events.properties.`$exception_list`)",
+            "JSONHas(properties, '$feature_flags')": "notEmpty(events.properties.`$feature_flags`)",
         }
         for expression, expected in expected_by_expr.items():
             context = HogQLContext(team_id=self.team.pk, enable_select_queries=True)
