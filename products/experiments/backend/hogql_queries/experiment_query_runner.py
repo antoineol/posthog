@@ -17,6 +17,7 @@ from posthog.schema import (
     ExperimentActorsQuery,
     ExperimentBreakdownResult,
     ExperimentDataWarehouseNode,
+    ExperimentExposureMetricSource,
     ExperimentFunnelMetric,
     ExperimentMeanMetric,
     ExperimentMetricMathType,
@@ -509,11 +510,16 @@ class ExperimentQueryRunner(QueryRunner):
                 ExperimentMetricMathType.MAX,
             )
         if isinstance(self.metric, ExperimentRetentionMetric):
-            if not isinstance(self.metric.start_event, (EventsNode, ActionsNode)) or not isinstance(
-                self.metric.completion_event, (EventsNode, ActionsNode)
-            ):
+            if not isinstance(
+                self.metric.start_event, (EventsNode, ActionsNode, ExperimentExposureMetricSource)
+            ) or not isinstance(self.metric.completion_event, (EventsNode, ActionsNode)):
                 return False
-            extension_seconds = get_conversion_window_seconds(self.metric) + conversion_window_to_seconds(
+            conversion_window_seconds = (
+                0
+                if isinstance(self.metric.start_event, ExperimentExposureMetricSource)
+                else get_conversion_window_seconds(self.metric)
+            )
+            extension_seconds = conversion_window_seconds + conversion_window_to_seconds(
                 self.metric.retention_window_end, self.metric.retention_window_unit
             )
             if extension_seconds > METRIC_EVENTS_MAX_WINDOW_EXTENSION_SECONDS:
