@@ -71,6 +71,29 @@ class TestDataQualityAdmin(BaseTest):
                     field = response.context["adminform"].form.fields[scoped_field]
                     self.assertEqual(field.clean(related_id).pk, related_id)
 
+    def test_staff_cannot_save_an_interval_the_api_cannot_name(self) -> None:
+        schedule = self.objects["dataqualitycheckschedule"]
+        assert isinstance(schedule, DataQualityCheckSchedule)
+        payload = {
+            "team": self.team.id,
+            "subject_type": SubjectType.METRIC,
+            "subject_uuid": str(schedule.subject_uuid),
+            "enabled": "on",
+            "interval": "2 00:00:00",
+            "next_run_at_0": schedule.next_run_at.strftime("%Y-%m-%d"),
+            "next_run_at_1": schedule.next_run_at.strftime("%H:%M:%S"),
+            "last_suite_run": str(schedule.last_suite_run_id),
+        }
+
+        response = self.client.post(
+            reverse("admin:data_quality_dataqualitycheckschedule_change", args=[schedule.pk]), payload
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("interval", response.context["adminform"].form.errors)
+        schedule.refresh_from_db()
+        self.assertEqual(schedule.interval, timedelta(days=1))
+
     @parameterized.expand([("dataqualitycheck",), ("dataqualitycheckschedule",)])
     def test_staff_can_save_changes_without_a_team_scope(self, model_name: str) -> None:
         instance = self.objects[model_name]
@@ -91,7 +114,7 @@ class TestDataQualityAdmin(BaseTest):
             assert isinstance(instance, DataQualityCheckSchedule)
             payload.update(
                 subject_uuid=str(instance.subject_uuid),
-                interval="2 00:00:00",
+                interval="01:00:00",
                 next_run_at_0=instance.next_run_at.strftime("%Y-%m-%d"),
                 next_run_at_1=instance.next_run_at.strftime("%H:%M:%S"),
                 last_suite_run=str(instance.last_suite_run_id),
@@ -105,4 +128,4 @@ class TestDataQualityAdmin(BaseTest):
             self.assertEqual(instance.description, "Check the order count")
         else:
             assert isinstance(instance, DataQualityCheckSchedule)
-            self.assertEqual(instance.interval, timedelta(days=2))
+            self.assertEqual(instance.interval, timedelta(hours=1))

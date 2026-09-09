@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import cast
 
 from django import forms
@@ -12,6 +13,8 @@ from django.utils.text import Truncator
 from posthog.models.scoping import team_scope
 from posthog.models.scoping.manager import TeamScopedManager
 
+from products.data_quality.backend.facade.api import label_from_interval
+from products.data_quality.backend.facade.enums import schedule_interval_choices
 from products.data_quality.backend.facade.models import DataQualityCheck, DataQualityCheckSchedule, DataQualitySuiteRun
 
 RAW_ID_LABEL_WORD_LIMIT = 14
@@ -108,8 +111,25 @@ class DataQualitySuiteRunAdmin(_DataQualityAdmin):
     readonly_fields = ("id", "created_at", "updated_at", "started_at", "finished_at")
 
 
+class _DataQualityCheckScheduleAdminForm(_DataQualityAdminForm):
+    def clean_interval(self) -> timedelta:
+        """Keep the stored duration inside the set the API can name.
+
+        The column is a plain duration, so this form is the only place a value outside the set can
+        be written. The read side maps the duration back to its label and has nothing to answer with
+        for a duration that has none.
+        """
+        interval = self.cleaned_data["interval"]
+        try:
+            label_from_interval(interval)
+        except ValueError as error:
+            raise ValidationError(f"Choose a supported interval: {', '.join(schedule_interval_choices())}.") from error
+        return interval
+
+
 @admin.register(DataQualityCheckSchedule)
 class DataQualityCheckScheduleAdmin(_DataQualityAdmin):
+    form = _DataQualityCheckScheduleAdminForm
     list_display = ("id", "subject_type", "subject_uuid", "interval", "enabled", "next_run_at")
     list_filter = ("subject_type", "enabled")
     raw_id_fields = ("team", "created_by", "last_suite_run")
