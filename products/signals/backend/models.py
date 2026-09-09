@@ -1,5 +1,6 @@
 import logging
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any, cast
 
@@ -838,6 +839,15 @@ class SignalReportAssignment(TeamScopedRootMixin, UUIDModel):
     actor_task_id = models.UUIDField(null=True, blank=True)
     actor_agent = models.CharField(max_length=200, null=True, blank=True)
     claimed_at = models.DateTimeField(null=True, blank=True)
+    claim = models.ForeignKey(
+        "SignalReportArtefact",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        db_constraint=False,
+        db_index=False,
+        related_name="+",
+    )
 
     pr_url = models.TextField(null=True, blank=True)
     repository = models.CharField(max_length=200, null=True, blank=True)
@@ -865,6 +875,24 @@ class SignalReportAssignment(TeamScopedRootMixin, UUIDModel):
         if self.actor_kind:
             return SignalReportWorkState.WORKING
         return SignalReportWorkState.UNCLAIMED
+
+
+class SignalPullRequest(TeamScopedRootMixin, UUIDModel):
+    State = SignalReportAssignment.PrState
+
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, db_constraint=False, related_name="+")
+    repository = models.CharField(max_length=200)
+    number = models.PositiveBigIntegerField()
+    url = models.URLField(max_length=2048)
+    state = models.CharField(max_length=10, choices=State, default=State.UNKNOWN)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["team", "repository", "number"], name="signals_pr_identity_unique"),
+        ]
 
 
 class SignalEmissionRecord(UUIDModel):
@@ -919,6 +947,9 @@ class SignalReportArtefact(UUIDModel):
         SUMMARY_CHANGE = "summary_change"
         CODE_REVIEW = "code_review"
         RELATED_TO = "related_to"
+        WORK_CLAIM = "work_claim"
+        WORK_RELEASE = "work_release"
+        PULL_REQUEST = "pull_request"
 
     # Every artefact is an append-only, point-in-time log entry — nothing is mutated in place by
     # the producers. The two sets below classify *what an entry means*, not how it is written:
@@ -951,6 +982,9 @@ class SignalReportArtefact(UUIDModel):
             ArtefactType.SUMMARY_CHANGE,
             ArtefactType.CODE_REVIEW,
             ArtefactType.RELATED_TO,
+            ArtefactType.WORK_CLAIM,
+            ArtefactType.WORK_RELEASE,
+            ArtefactType.PULL_REQUEST,
         }
     )
 
@@ -971,6 +1005,24 @@ class SignalReportArtefact(UUIDModel):
     actor_agent = models.CharField(max_length=200, null=True, blank=True)
     created_by = models.ForeignKey("posthog.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     task = models.ForeignKey("tasks.Task", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    claim = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        db_constraint=False,
+        db_index=False,
+        related_name="work_artefacts",
+    )
+    pull_request = models.ForeignKey(
+        SignalPullRequest,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        db_constraint=False,
+        db_index=False,
+        related_name="report_links",
+    )
     channel = models.ForeignKey(
         "tasks.Channel",
         null=True,
@@ -993,6 +1045,8 @@ class SignalReportArtefact(UUIDModel):
             # all reports (`repo_corrections`) — which no report-anchored index can serve.
             models.Index(fields=["team", "type", "-created_at"], name="signals_sig_team_type_ct_idx"),
             models.Index(fields=["channel"], name="signals_sig_channel_idx"),
+            models.Index(fields=["pull_request", "report"], name="signals_artefact_pr_report_idx"),
+            models.Index(fields=["claim"], name="signals_artefact_claim_idx"),
         ]
 
     @classmethod
@@ -1013,6 +1067,33 @@ class SignalReportArtefact(UUIDModel):
         # not diverge. The FK comes from attribution, so require task attribution that matches.
         if isinstance(content, TaskRunArtefact) and content.task_id != attribution.task_id:
             raise ArtefactContentValidationError("task_run content.task_id must match the artefact's attributed task")
+        if (
+            attribution.task_id
+            and not attribution.claim_id
+            and artefact_type_for(content) in {"commit", "note", "task_run"}
+        ):
+            claim_id = (
+                SignalReportAssignment.all_teams.filter(
+                    team_id=team_id,
+                    report_id=report_id,
+                    actor_kind=SignalActorKind.TASK,
+                    actor_task_id=attribution.task_id,
+                )
+                .values_list("claim_id", flat=True)
+                .first()
+            )
+            if claim_id:
+                attribution = replace(attribution, claim_id=str(claim_id))
+        if (
+            attribution.claim_id
+            and not cls.objects.filter(
+                id=attribution.claim_id,
+                team_id=team_id,
+                report_id=report_id,
+                type=cls.ArtefactType.WORK_CLAIM,
+            ).exists()
+        ):
+            raise ArtefactContentValidationError("Claim must belong to this report and team.")
         return cls.objects.create(
             team_id=team_id,
             report_id=report_id,
@@ -1022,6 +1103,7 @@ class SignalReportArtefact(UUIDModel):
             actor_agent=attribution.agent_name,
             created_by_id=attribution.user_id,
             task_id=attribution.task_id,
+            claim_id=attribution.claim_id,
             channel_id=content.channel_id if isinstance(content, ChannelAssignment) else None,
         )
 
@@ -1120,7 +1202,7 @@ class SignalReportArtefact(UUIDModel):
                 team_id=team_id,
                 report_id=content.report_id,
                 content=RelatedTo(report_id=str(report_id)),
-                attribution=attribution,
+                attribution=replace(attribution, claim_id=None),
             )
         return artefact
 
