@@ -75,6 +75,16 @@ class TestQueryScanTrigger(SimpleTestCase):
         self.delay.assert_not_called()
         self.redis.set.assert_not_called()
 
+    def test_a_broker_failure_does_not_fail_the_query(self) -> None:
+        # ClickHouse has already done the work and the result is not cached yet, so an optional
+        # side effect must not take a successful query down with it.
+        self.delay.side_effect = Exception("broker unavailable")
+
+        result = self._trigger()
+
+        assert result.triggered is False
+        assert result.skipped_reason == "enqueue_failed"
+
     def test_a_killed_run_records_that_on_the_pending_slot(self) -> None:
         # The scan endpoint answers from this slot until the job finishes, so a stopped run that
         # left no `killed` here would be reported as one that ran to completion.

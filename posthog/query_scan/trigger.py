@@ -3,12 +3,16 @@
 The runner calls this once per blocking run, so everything here is cheap: the flag is already
 cached in-process, and the Redis read for an existing slot happens only after the run has
 passed every other test.
+
+Nothing here may change what the person gets. The analysis is advice, so a broker or Redis
+failure drops the enqueue and reports a skip, never the query result.
 """
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
+import structlog
 from pydantic import BaseModel
 
 from posthog.schema import HogQLQueryModifiers
@@ -23,7 +27,9 @@ from posthog.query_scan.slot import (
     set_pending,
 )
 
-SkipReason = Literal["flag_off", "below_floor", "api_key", "not_cacheable", "slot_exists"]
+logger = structlog.get_logger(__name__)
+
+SkipReason = Literal["flag_off", "below_floor", "api_key", "not_cacheable", "slot_exists", "enqueue_failed"]
 
 
 @frozen
@@ -85,19 +91,26 @@ def maybe_trigger_query_scan(
     # module-level import here would close that cycle.
     from posthog.tasks.query_scan import analyze_query_scan  # noqa: PLC0415
 
-    set_pending(team_id, cache_key, killed=killed)
-    analyze_query_scan.delay(
-        team_id=team_id,
-        cache_key=cache_key,
-        query=_task_payload(query),
-        modifiers=_task_payload(modifiers) if modifiers is not None else None,
-        insight_id=insight_id,
-        dashboard_id=dashboard_id,
-        rows_read=stats.rows_read,
-        duration_ms=duration_ms,
-        trigger=trigger,
-        user_id=user_id,
-        killed=killed,
-        error_type=error_type,
-    )
+    try:
+        set_pending(team_id, cache_key, killed=killed)
+        analyze_query_scan.delay(
+            team_id=team_id,
+            cache_key=cache_key,
+            query=_task_payload(query),
+            modifiers=_task_payload(modifiers) if modifiers is not None else None,
+            insight_id=insight_id,
+            dashboard_id=dashboard_id,
+            rows_read=stats.rows_read,
+            duration_ms=duration_ms,
+            trigger=trigger,
+            user_id=user_id,
+            killed=killed,
+            error_type=error_type,
+        )
+    except Exception:
+        # The publish reaches the broker, which can be down while ClickHouse is fine. The run
+        # already cost the person its full duration and is not cached yet, so failing here would
+        # throw away a result they waited for. The next slow run enqueues again.
+        logger.warning("query_scan_enqueue_failed", team_id=team_id, exc_info=True)
+        return QueryScanTrigger(triggered=False, skipped_reason="enqueue_failed")
     return QueryScanTrigger(triggered=True, skipped_reason=None)
