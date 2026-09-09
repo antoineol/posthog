@@ -3096,6 +3096,7 @@ class TestDashboard(APIBaseTest, QueryMatchingTest):
                         },
                     },
                     "resolved_date_range": ANY,
+                    "query_scan": None,
                     "query_status": None,
                     "result": None,
                     "saved": True,

@@ -6633,6 +6633,10 @@ class QueryScanSummary(BaseModel):
     )
     duration_ms: int = Field(..., description="ClickHouse time for the last fresh run.")
     events_in_range: int | None = None
+    killed: bool | None = Field(
+        default=None,
+        description="True when ClickHouse stopped the run instead of finishing it.",
+    )
     mode: QueryScanMode = Field(..., description="Flag mode for this team: what clients may show")
     range: QueryScanRange | None = None
     rows_read: int = Field(
@@ -6682,6 +6686,10 @@ class QueryStatus(BaseModel):
     )
     budget_remaining_bytes: int | None = None
     bytes_read: int | None = None
+    cache_key: str | None = Field(
+        default=None,
+        description=("Cache key of the run that failed, so clients can ask for its query scan."),
+    )
     complete: bool | None = Field(
         default=False,
         description=(
@@ -6715,6 +6723,7 @@ class QueryStatus(BaseModel):
     )
     query_async: Literal[True] = Field(default=True, description="ONLY async queries use QueryStatus.")
     query_progress: ClickhouseQueryProgress | None = None
+    query_scan: QueryScanSummary | None = None
     results: Any | None = None
     start_time: AwareDatetime | None = Field(default=None, description="When was query execution task enqueued.")
     task_id: str | None = None

@@ -263,6 +263,45 @@ class TestQueryRunner(BaseTest):
                 34,
             )
 
+    def test_a_killed_run_over_the_floor_is_analyzed_and_carries_its_scan(self):
+        # Every retry of a killed query dies the same way, so this run is the only chance to
+        # give the person advice; the exception has to carry it to the API layers above.
+        TestQueryRunner = self.setup_test_query_runner_class()
+
+        def calculate_until_clickhouse_gives_up(_self):
+            record(rows_read=90, bytes_read=900, duration_ms=4000.0)
+            raise ClickHouseQueryMemoryLimitExceeded()
+
+        redis_client = mock.Mock()
+        redis_client.get.return_value = None
+        runner = TestQueryRunner(query={"some_attr": "bla"}, team=self.team)
+        with (
+            mock.patch(
+                "posthog.hogql_queries.query_runner.get_query_scan_flag",
+                return_value=QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5),
+            ),
+            mock.patch("posthog.query_scan.slot.query_cache_read_client", return_value=redis_client),
+            mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=redis_client),
+            mock.patch("posthog.tasks.query_scan.analyze_query_scan.delay") as delay,
+            mock.patch.object(
+                TestQueryRunner, "_calculate", autospec=True, side_effect=calculate_until_clickhouse_gives_up
+            ),
+            self.assertRaises(ClickHouseQueryMemoryLimitExceeded) as raised,
+        ):
+            runner.run(execution_mode=ExecutionMode.CALCULATE_BLOCKING_ALWAYS)
+
+        assert delay.call_count == 1
+        assert delay.call_args.kwargs["killed"] is True
+        assert delay.call_args.kwargs["error_type"] == "ClickHouseQueryMemoryLimitExceeded"
+        assert getattr(raised.exception, "cache_key", None) == runner.get_cache_key()
+        assert getattr(raised.exception, "query_scan", None) == {
+            "mode": "show",
+            "rows_read": 90,
+            "duration_ms": 4000,
+            "killed": True,
+            "status": "pending",
+        }
+
     def test_calculate_runs_validators_before_calculation(self):
         TestQueryRunner = self.setup_test_query_runner_class()
         validation_rule = mock.MagicMock()

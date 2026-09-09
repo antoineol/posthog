@@ -54,6 +54,7 @@ from posthog.constants import AvailableFeature
 from posthog.hogql_queries.query_runner import SHARED_FORCE_BLOCKING_STALENESS_WINDOW, ExecutionMode
 from posthog.models import Filter, OrganizationMembership, SharingConfiguration, Team, User
 from posthog.models.project import Project
+from posthog.query_scan.flag import QueryScanFlag
 from posthog.test.db_context_capturing import capture_db_queries
 from posthog.test.insight_queries import default_pageview_query, insight_query
 from posthog.test.persons import create_person
@@ -5017,6 +5018,59 @@ class TestInsightErrorHandling(ClickhouseTestMixin, APIBaseTest):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn(error_message, str(response.json()))
+
+
+class TestInsightQueryScan(ClickhouseTestMixin, APIBaseTest):
+    # The response's `warnings` list never reaches a tile, so the serializer has to carry both the
+    # summary and the stored findings on `query_scan` or a dashboard shows nothing.
+    @patch("posthog.caching.calculate_results.calculate_for_query_based_insight")
+    def test_insight_carries_the_query_scan_with_its_findings(self, mock_calculate: mock.MagicMock) -> None:
+        insight = Insight.objects.create(
+            team=self.team,
+            created_by=self.user,
+            query={"kind": "TrendsQuery", "series": [{"kind": "EventsNode", "event": "$pageview"}]},
+        )
+        mock_calculate.return_value = InsightResult(
+            result=[],
+            last_refresh=timezone.now(),
+            cache_key="cache-key",
+            is_cached=True,
+            timezone=self.team.timezone,
+            query_scan={"mode": "show", "rows_read": 41_200, "duration_ms": 19_000},
+        )
+        redis_client = mock.Mock()
+        redis_client.get.return_value = json.dumps(
+            {
+                "version": 1,
+                "status": "done",
+                "events_in_range": 16_000,
+                "findings": [
+                    {
+                        "type": "query_scan",
+                        "kind": "all_time",
+                        "message": "This insight has no start date.",
+                        "fix": "Set a date range on the insight instead of All time.",
+                        "rows_read": 41_200,
+                        "duration_ms": 19_000,
+                    }
+                ],
+            }
+        )
+
+        with (
+            patch(
+                "posthog.query_scan.serve.get_query_scan_flag",
+                return_value=QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5),
+            ),
+            patch("posthog.query_scan.slot.query_cache_read_client", return_value=redis_client),
+        ):
+            response = self.client.get(f"/api/projects/{self.team.id}/insights/{insight.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.json())
+        query_scan = response.json()["query_scan"]
+        self.assertEqual(query_scan["status"], "done")
+        self.assertEqual(query_scan["events_in_range"], 16_000)
+        self.assertEqual([warning["kind"] for warning in query_scan["warnings"]], ["all_time"])
 
 
 class TestInsightBulkDelete(ClickhouseTestMixin, APIBaseTest, QueryMatchingTest):

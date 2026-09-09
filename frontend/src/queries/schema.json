@@ -50133,6 +50133,10 @@
                 "events_in_range": {
                     "$ref": "#/definitions/integer"
                 },
+                "killed": {
+                    "description": "True when ClickHouse stopped the run instead of finishing it.",
+                    "type": "boolean"
+                },
                 "mode": {
                     "$ref": "#/definitions/QueryScanMode",
                     "description": "Flag mode for this team: what clients may show"
@@ -50517,6 +50521,10 @@
                 "bytes_read": {
                     "$ref": "#/definitions/integer"
                 },
+                "cache_key": {
+                    "description": "Cache key of the run that failed, so clients can ask for its query scan.",
+                    "type": "string"
+                },
                 "complete": {
                     "default": false,
                     "description": "Whether the query is still running. Will be true if the query is complete, even if it errored. Either result or error will be set.",
@@ -50573,6 +50581,9 @@
                 },
                 "query_progress": {
                     "$ref": "#/definitions/ClickhouseQueryProgress"
+                },
+                "query_scan": {
+                    "$ref": "#/definitions/QueryScanSummary"
                 },
                 "results": {},
                 "start_time": {

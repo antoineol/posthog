@@ -1016,6 +1016,8 @@ class TestQuery(ClickhouseTestMixin, APIBaseTest):
                         "dashboard_id": mock.ANY,
                         "query_progress": None,
                         "labels": None,
+                        "cache_key": None,
+                        "query_scan": None,
                     }
                 },
             )
@@ -1322,6 +1324,53 @@ class TestQueryRetrieve(APIBaseTest):
         response = self.client.delete(f"/api/environments/{self.team.id}/query/{self.valid_query_id}/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.redis_client_mock.delete.call_count, 2)
+
+
+class TestQueryScan(APIBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.redis_client_mock = mock.Mock()
+        patcher = mock.patch("posthog.query_scan.slot.query_cache_read_client", return_value=self.redis_client_mock)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_returns_the_stored_scan(self):
+        self.redis_client_mock.get.return_value = json.dumps(
+            {
+                "version": 1,
+                "status": "done",
+                "events_in_range": 16_000,
+                "range": {"from": "2025-08-05", "to": "2026-09-09"},
+                "killed": True,
+                "findings": [
+                    {
+                        "type": "query_scan",
+                        "kind": "no_event_filter",
+                        "message": "This query read every event in its date range.",
+                        "fix": "Add an event filter naming the events this question is about.",
+                        "rows_read": 41_200,
+                        "duration_ms": 19_000,
+                    }
+                ],
+            }
+        )
+
+        response = self.client.get(f"/api/environments/{self.team.id}/query/cache_key_1/scan/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["status"], "done")
+        self.assertEqual(body["events_in_range"], 16_000)
+        self.assertEqual(body["range"], {"from": "2025-08-05", "to": "2026-09-09"})
+        self.assertTrue(body["killed"])
+        self.assertEqual([warning["kind"] for warning in body["warnings"]], ["no_event_filter"])
+
+    def test_returns_404_when_the_query_was_never_analyzed(self):
+        self.redis_client_mock.get.return_value = None
+
+        response = self.client.get(f"/api/environments/{self.team.id}/query/cache_key_1/scan/")
+
+        self.assertEqual(response.status_code, 404)
 
 
 class TestQueryDraftSql(APIBaseTest):

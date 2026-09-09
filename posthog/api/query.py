@@ -9,12 +9,12 @@ from django.http.response import HttpResponseBase
 import orjson
 import structlog
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, OpenApiResponse
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema_field
 from opentelemetry import trace
 from prometheus_client import Counter
 from pydantic import BaseModel
-from rest_framework import status, viewsets
-from rest_framework.exceptions import APIException, NotAuthenticated, Throttled, ValidationError
+from rest_framework import serializers, status, viewsets
+from rest_framework.exceptions import APIException, NotAuthenticated, NotFound, Throttled, ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -59,6 +59,7 @@ from posthog.hogql_queries.hogql_query_runner import HogQLQueryRunner
 from posthog.hogql_queries.query_runner import ExecutionMode, execution_mode_from_refresh
 from posthog.models.user import User
 from posthog.models.utils import uuid7
+from posthog.query_scan import slot as query_scan_slot
 from posthog.rate_limit import (
     AIBurstRateThrottle,
     AISustainedRateThrottle,
@@ -205,6 +206,66 @@ def required_scopes_for_query_payload(query: object) -> list[str] | None:
             return _QUERY_KIND_SCOPES[kind]
         current_query = current_query.get("source")
     return None
+
+
+class QueryScanFindingSerializer(serializers.Serializer):
+    """One finding from a query scan. Mirrors the `QueryScanWarning` schema model that the same
+    findings take when they ride on a query response's `warnings`."""
+
+    type = serializers.CharField(help_text="Always `query_scan`, which tells this apart from the other warning kinds.")
+    kind = serializers.CharField(
+        help_text=(
+            "The structural problem found: `no_event_filter`, `event_filter_not_used`, `no_start_date`, "
+            "`persons_join`, `all_events` or `all_time`."
+        )
+    )
+    reason = serializers.CharField(
+        allow_null=True,
+        help_text=(
+            "Why the filter could not be used, for the kinds that have one: `in_or`, `wrapped`, `negated`, "
+            "`dynamic`, `not_pruned`, `column` or `filters`."
+        ),
+    )
+    message = serializers.CharField(help_text="What happened and what to do about it, written for the person.")
+    fix = serializers.CharField(help_text='The instruction handed to "Fix with AI" and to agents.')
+    clause = serializers.CharField(
+        allow_null=True, help_text="The offending condition printed back as HogQL, when there is one."
+    )
+    evidence = serializers.CharField(
+        allow_null=True, help_text="What ClickHouse reported about the read, when EXPLAIN was available."
+    )
+    rows_read = serializers.IntegerField(help_text="Rows ClickHouse read for the analyzed run, all tables included.")
+    duration_ms = serializers.IntegerField(help_text="ClickHouse time for the analyzed run, in milliseconds.")
+    events_in_range = serializers.IntegerField(
+        allow_null=True, help_text="Events the project holds over the range the analyzed query read."
+    )
+
+
+class QueryScanResponseSerializer(serializers.Serializer):
+    """The stored analysis of one query, addressed by the cache key of the run that triggered it."""
+
+    status = serializers.CharField(help_text="`pending` while the analysis runs, `done` once the findings are final.")
+    warnings = QueryScanFindingSerializer(
+        many=True, help_text="Findings for this query. Empty when the analysis found nothing to fix."
+    )
+    events_in_range = serializers.IntegerField(
+        allow_null=True, help_text="Events the project holds over the range the query read."
+    )
+    range = serializers.SerializerMethodField(help_text="The days the event count covers.")
+    killed = serializers.BooleanField(help_text="True when ClickHouse stopped the analyzed run instead of finishing.")
+
+    @extend_schema_field(
+        {
+            "type": "object",
+            "nullable": True,
+            "properties": {
+                "from": {"type": "string", "format": "date"},
+                "to": {"type": "string", "format": "date"},
+            },
+        }
+    )
+    def get_range(self, scan: dict) -> dict | None:
+        return scan.get("range")
 
 
 class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMixin, viewsets.ViewSet):
@@ -376,6 +437,13 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
             if isinstance(e, ExposedHogQLError):
                 request_user = request.user if isinstance(request.user, User) else None
                 detail, extra = enrich_hogql_validation_error(query, self.team, request_user, detail)
+            # A run ClickHouse stopped carries its scan, so the client can show the advice under
+            # the error instead of only the failure.
+            scan_extra = {
+                key: value for key in ("cache_key", "query_scan") if (value := getattr(e, key, None)) is not None
+            }
+            if scan_extra:
+                extra = {**(extra or {}), **scan_extra}
             validation_error = ValidationError(detail, getattr(e, "code_name", None))
             if extra is not None:
                 validation_error.extra = extra  # type: ignore[attr-defined]
@@ -538,6 +606,34 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
             if not getattr(e, "served_from_query_failure_cache", False):
                 capture_exception(e)
             raise
+
+    @extend_schema(
+        description=(
+            "Get the query scan for a cache key: what the last slow run of that query read, and the "
+            "findings the analysis produced. 404 when the query has not been analyzed."
+        ),
+        responses={
+            200: QueryScanResponseSerializer,
+            404: OpenApiResponse(description="No query scan exists for this cache key."),
+        },
+    )
+    @action(methods=["GET"], detail=True, url_path="scan", required_scopes=["query:read"])
+    def get_query_scan(self, request: Request, pk: str, *args, **kwargs) -> Response:
+        slot = query_scan_slot.get(self.team_id, pk)
+        if slot is None:
+            raise NotFound("There is no query scan for this cache key.")
+        return Response(
+            QueryScanResponseSerializer(
+                {
+                    "status": str(slot.status),
+                    "warnings": [finding.model_dump(by_alias=True) for finding in slot.findings],
+                    "events_in_range": slot.events_in_range,
+                    "range": slot.range.model_dump(by_alias=True) if slot.range is not None else None,
+                    "killed": slot.killed,
+                }
+            ).data,
+            status=status.HTTP_200_OK,
+        )
 
     def handle_column_ch_error(self, error):
         if getattr(error, "message", None):

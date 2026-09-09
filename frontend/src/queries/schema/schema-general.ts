@@ -603,6 +603,8 @@ export interface QueryScanSummary {
     status?: QueryScanStatus
     events_in_range?: integer
     range?: QueryScanRange
+    /** True when ClickHouse stopped the run instead of finishing it. */
+    killed?: boolean
 }
 
 export type QueryScanFindingKind =
@@ -2847,6 +2849,9 @@ export type QueryStatus = {
     labels?: string[]
     bytes_read?: integer
     budget_remaining_bytes?: integer
+    /** Cache key of the run that failed, so clients can ask for its query scan. */
+    cache_key?: string
+    query_scan?: QueryScanSummary
 }
 
 export interface LifecycleQueryResponse extends AnalyticsQueryResponseBase {
