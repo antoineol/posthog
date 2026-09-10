@@ -101,7 +101,7 @@ def scan_summary_with_findings(team: Team, summary: dict[str, Any], cache_key: s
 
 def _look_up(team: Team, duration_ms: Any, cache_key: str | None) -> _SlotLookup:
     # The flag is resolved first because a cached summary has to be corrected against it even
-    # when no slot is read. It is held in-process for a minute, so this costs no round trip.
+    # when no slot is read. It is cached in-process, so this costs no round trip.
     flag = get_query_scan_flag(team)
     if flag is None:
         return _SlotLookup(flag=None, over_floor=False)

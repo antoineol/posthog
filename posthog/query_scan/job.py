@@ -404,7 +404,6 @@ def _slot_range(
 
 
 def _retention_floor_date(retention_months: int | None) -> date | None:
-    """The day the team's events retention starts, for the copy the person reads."""
     if retention_months is None:
         return None
     return (datetime.now(UTC) - relativedelta(months=retention_months)).date()

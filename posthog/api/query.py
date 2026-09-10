@@ -107,10 +107,10 @@ def _add_query_cost_headers(response: HttpResponseBase, bytes_read: int, remaini
 
 
 def _scan_extra(error: Exception) -> dict[str, Any]:
-    """The scan a stopped run left on the exception, ready to put on the response.
+    """The scan a stopped run left on the exception, as the error serializer's ``extra``.
 
-    The killed-run path sets these as plain attributes and the error serializer reads only
-    ``extra``, so an error that skips this reaches the caller without them.
+    The killed-run path sets these as plain attributes, so an error that skips this reaches the
+    caller without them.
     """
     return {key: value for key in ("cache_key", "query_scan") if (value := getattr(error, key, None)) is not None}
 

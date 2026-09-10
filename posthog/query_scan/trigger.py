@@ -47,8 +47,6 @@ SkipReason = Literal[
 
 @frozen
 class QueryScanTrigger:
-    """Whether the run was enqueued for analysis, and the reason when it was not."""
-
     triggered: bool
     skipped_reason: SkipReason | None
 
