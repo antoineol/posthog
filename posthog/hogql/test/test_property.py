@@ -1,12 +1,12 @@
 from collections.abc import Iterable
 from typing import Any, Literal, Optional, Union, cast
 
+import pytest
 from freezegun import freeze_time
 from posthog.test.base import APIBaseTest, BaseTest, _create_event, cleanup_materialized_columns
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings
-from django.test import override_settings
 
 from parameterized import parameterized
 
@@ -2721,7 +2721,9 @@ class TestNegativeOperatorNullParityWithData(APIBaseTest):
         assert self._kept(filter, self.EXCEPTION_EVENT) == expected_kept
 
 
-@override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
+@pytest.mark.skipif(
+    not settings.CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA, reason="Requires test-new-events-schema CI label (#63448)"
+)
 # $active_feature_flags is a native Array(String) subcolumn on the new events schema, so its negative
 # multi-value filters compile through the arrayExists optimizer rather than a scalar comparison. These
 # execute against ClickHouse to prove the optimized path returns the right rows, not only the right SQL.

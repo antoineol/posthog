@@ -74,6 +74,9 @@ def _normalize_snapshot_sql(sql: str) -> str:
     return "\n".join(line.rstrip() for line in sql.splitlines())
 
 
+@pytest.mark.skipif(
+    not settings.CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA, reason="Requires test-new-events-schema CI label (#63448)"
+)
 class TestNewEventsSchemaPropertySubcolumns(SimpleTestCase):
     def _context(self) -> HogQLContext:
         team = Team(id=1, project_id=1)
@@ -103,7 +106,6 @@ class TestNewEventsSchemaPropertySubcolumns(SimpleTestCase):
         assert plan is not None
         return plan
 
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
     def test_property_comparison_planner_uses_json_array_subcolumn_type(self) -> None:
         plan = self._plan_where_comparison("select count() from events where properties.$exception_types = 'TypeError'")
 
@@ -128,13 +130,11 @@ class TestNewEventsSchemaPropertySubcolumns(SimpleTestCase):
             ),
         ]
     )
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
     def test_typed_string_path_reads_empty_as_null(self, _name: str, query: str, expected: str) -> None:
         printed = self._print_select(query)
 
         assert expected in printed, printed
 
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
     def test_negative_multi_icontains_array_property_stays_optimized(self) -> None:
         where = property_to_expr(
             {
@@ -163,7 +163,6 @@ class TestNewEventsSchemaPropertySubcolumns(SimpleTestCase):
         # or every row pays to serialize the array just to null-check it.
         assert "toJSONString" not in printed, printed
 
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
     def test_exception_types_use_array_subcolumn(self) -> None:
         printed = self._print_select("select count() from events where properties.$exception_types = 'TypeError'")
 
@@ -178,7 +177,6 @@ class TestNewEventsSchemaPropertySubcolumns(SimpleTestCase):
             ("dynamic_array", "custom_array"),
         ]
     )
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
     def test_array_value_reads_are_json_strings(self, _name: str, property_name: str) -> None:
         printed = self._print_select(f"select lower(properties.{property_name}) from events")
         escaped_property_name = f"`{property_name}`" if property_name.startswith("$") else property_name
@@ -205,7 +203,6 @@ class TestNewEventsSchemaPropertySubcolumns(SimpleTestCase):
         assert f"events.properties.{escaped_property_name}" in expression
         assert "toJSONString(events.properties)" not in expression
 
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
     def test_jsonextract_string_arrays_read_array_subcolumn(self) -> None:
         printed = self._print_select(
             "select JSONExtract(ifNull(properties.$exception_types, ''), 'Array(String)') from events"
@@ -230,7 +227,6 @@ class TestNewEventsSchemaPropertySubcolumns(SimpleTestCase):
             ("person_blob", "poe.properties", PropertyDefinition.Type.PERSON, True),
         ]
     )
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
     def test_quarantine_cannot_bypass_property_restrictions(
         self, _name: str, expression: str, property_type: int, blob: bool
     ) -> None:
@@ -924,7 +920,9 @@ class TestJSONExtractToMaterializedColumn(ClickhouseTestMixin, BaseTest):
 
             assert "mat_" not in printed, f"Expected no mat_ column in output, got: {printed}"
 
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
+    @pytest.mark.skipif(
+        not settings.CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA, reason="Requires test-new-events-schema CI label (#63448)"
+    )
     def test_new_events_schema_jsonextract_rewrites_use_json_subcolumns(self):
         printed = self._print_select(
             "select JSONExtractInt(properties, 'metric'), "
@@ -943,7 +941,9 @@ class TestJSONExtractToMaterializedColumn(ClickhouseTestMixin, BaseTest):
         assert "toJSONString(events.properties)" not in printed, printed
         assert "toJSONString(events.properties.email)" in printed, printed
 
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
+    @pytest.mark.skipif(
+        not settings.CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA, reason="Requires test-new-events-schema CI label (#63448)"
+    )
     def test_new_events_schema_nested_jsonextractstring_uses_string_default(self):
         printed = self._print_select("select JSONExtractString(properties, 'metadata', 'score') from events")
 
@@ -952,7 +952,9 @@ class TestJSONExtractToMaterializedColumn(ClickhouseTestMixin, BaseTest):
         assert "%(hogql_val_0)s" in printed, printed
         assert "JSONExtractKeysAndValuesRaw" not in printed, printed
 
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
+    @pytest.mark.skipif(
+        not settings.CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA, reason="Requires test-new-events-schema CI label (#63448)"
+    )
     def test_new_events_schema_jsonextract_non_nullable_type_uses_default(self):
         printed = self._print_select("select JSONExtract(properties, 'score', 'Float64') from events")
 
@@ -960,7 +962,9 @@ class TestJSONExtractToMaterializedColumn(ClickhouseTestMixin, BaseTest):
         assert "JSONExtract(ifNull(" in printed, printed
         assert "JSONExtractKeysAndValuesRaw" not in printed, printed
 
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
+    @pytest.mark.skipif(
+        not settings.CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA, reason="Requires test-new-events-schema CI label (#63448)"
+    )
     def test_new_events_schema_jsonextract_array_uses_json_serialized_subcolumn(self):
         printed = self._print_select(
             "select JSONExtract(ifNull(properties.arr_field, '[]'), 'Array(String)') from events"
@@ -971,7 +975,9 @@ class TestJSONExtractToMaterializedColumn(ClickhouseTestMixin, BaseTest):
         assert "toJSONString(events.properties.^arr_field)" in printed, printed
         assert "JSONExtract(events.properties" not in printed, printed
 
-    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
+    @pytest.mark.skipif(
+        not settings.CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA, reason="Requires test-new-events-schema CI label (#63448)"
+    )
     def test_new_events_schema_jsonextract_respects_restricted_properties(self):
         printed = self._print_select(
             "select JSONExtractInt(properties, 'secret'), "

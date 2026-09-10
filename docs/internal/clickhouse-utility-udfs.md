@@ -175,3 +175,14 @@ Regression tests cover malformed discarded values, duplicate handling in wide ob
 The buffer-reuse test alternates dotted-object widths and verifies exact output, cleared references, the cache bound, and release after a small row.
 
 These local measurements should be repeated on deployment hardware before estimating fleet capacity.
+
+## Running native JSON schema tests
+
+The `test-new-events-schema` PR label enables the additional backend CI jobs with
+`CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=true`. Native-schema-only tests must skip
+when that setting is false, including SQL-generation tests. Use `pytest.mark.skipif`
+against the setting; do not force it on with `override_settings`. Tests that support
+both schemas run with the job’s configured schema.
+
+For a local native-schema run, set `CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=true`
+when invoking `hogli test`. Manual workflow dispatch also enables the native-schema jobs.
