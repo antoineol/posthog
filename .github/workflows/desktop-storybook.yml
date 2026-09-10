@@ -133,7 +133,7 @@ jobs:
             - name: Serve Storybook
               working-directory: products/desktop
               run: |
-                  pnpm --filter code exec http-server apps/code/storybook-static --port 6006 --silent &
+                  pnpm --filter code exec http-server storybook-static --port 6006 --silent &
                   pnpm --filter code exec wait-on http://127.0.0.1:6006/iframe.html --timeout 30000
 
             - name: Clean snapshot directory

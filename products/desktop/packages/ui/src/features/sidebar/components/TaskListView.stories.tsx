@@ -174,6 +174,9 @@ export const Default: Story = {};
 
 export const Archiving: Story = {
   render: (args) => <ArchivingTaskList {...args} />,
+  parameters: {
+    testOptions: { waitForLoadersToDisappear: false },
+  },
 };
 
 export const TaskStates: Story = {
