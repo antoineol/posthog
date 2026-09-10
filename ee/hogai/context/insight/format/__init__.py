@@ -72,8 +72,13 @@ QUERY_SCAN_WARNING_TAG = "query_scan_warning"
 _QUERY_SCAN_LEAD = "This query read {rows} rows in {secs} s, far more than it needs."
 _QUERY_SCAN_KILLED_LEAD = "ClickHouse stopped this query after {secs} s, having read {rows} rows."
 _QUERY_SCAN_INSTRUCTION = (
-    "Before running it again: tell the user which filter is missing, propose a specific change that "
-    "keeps the question the same, and ask them to confirm. Do not narrow the query without saying so."
+    "First run bounded exploratory queries to see what the data looks like, each with a recent "
+    "`timestamp` bound and a `LIMIT`, for example `SELECT event, count() FROM events WHERE the other "
+    "conditions AND timestamp >= now() - interval 7 day GROUP BY event ORDER BY count() DESC LIMIT 20`. "
+    "Then tell the user which filter is missing, propose a rewrite that keeps the question the same, "
+    "and ask them to confirm before running it again. Do not narrow the query without saying so. "
+    "Never invent event names or dates: if you cannot tell which events the question is about, say so "
+    "and leave a `-- fill in the events this question is about` comment where the filter goes."
 )
 _QUERY_SCAN_SHORT_FORM = (
     "This query read {rows} rows in {secs} s. This is likely far more than needed; check the event "

@@ -785,12 +785,10 @@ export interface sqlEditorLogicActions {
     fixErrors: (
         query: string,
         error?: string | undefined,
-        connectionId?: string | undefined,
-        instruction?: string | undefined
+        connectionId?: string | undefined
     ) => {
         connectionId: string | undefined
         error: string | undefined
-        instruction: string | undefined
         query: string
     } // fixSQLErrorsLogic
     fixErrorsFailure: (
@@ -806,7 +804,6 @@ export interface sqlEditorLogicActions {
             | {
                   connectionId: string | undefined
                   error: string | undefined
-                  instruction: string | undefined
                   query: string
               }
             | undefined
@@ -814,7 +811,6 @@ export interface sqlEditorLogicActions {
         payload?: {
             connectionId: string | undefined
             error: string | undefined
-            instruction: string | undefined
             query: string
         }
         response: Response
@@ -1799,33 +1795,17 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         }
         const getActiveBIEditorState = (): BIEditorState | undefined =>
             values.featureFlags[FEATURE_FLAGS.SQL_EDITOR_BI_MODE] ? values.activeTab?.biEditorState : undefined
-        // One action serves the error fixer and the query scan's advice, so without a mode the two
-        // features share one success and failure count.
-        const fixErrorsMode = (instruction: string | undefined): string => (instruction ? 'query_scan' : 'error')
 
         return {
-            fixErrors: ({ instruction }) => {
-                // `fixErrorsFailure` gets no payload, so the failure listener reads the mode here.
-                cache.fixErrorsMode = fixErrorsMode(instruction)
-            },
-            fixErrorsSuccess: ({ response, payload }) => {
+            fixErrorsSuccess: ({ response }) => {
+                actions.setSuggestedQueryInput(response.query, 'hogql_fixer')
+
                 posthog.capture('ai-error-fixer-success', {
                     trace_id: response.trace_id,
-                    mode: fixErrorsMode(payload?.instruction),
                 })
-
-                // The advice prompt returns the query untouched when no change would keep the
-                // question the same, so an identical query is an answer, not a failed edit. The
-                // error fixer has no such answer, so it still goes through the diff.
-                if (payload?.instruction && response.query === payload.query) {
-                    lemonToast.info('No change would keep the question the same, so the query is unchanged.')
-                    return
-                }
-
-                actions.setSuggestedQueryInput(response.query, 'hogql_fixer')
             },
             fixErrorsFailure: () => {
-                posthog.capture('ai-error-fixer-failure', { mode: cache.fixErrorsMode })
+                posthog.capture('ai-error-fixer-failure')
             },
             reportAIQueryPrompted: () => {
                 posthog.capture('ai_query_prompted')

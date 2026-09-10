@@ -8,13 +8,12 @@ import { LemonButton } from 'lib/lemon-ui/LemonButton'
 
 import { uiCustomizationLogic } from '~/layout/uiCustomizationLogic'
 
-import { QueryScanState, queryScanStatLine } from './queryScan'
+import { QueryScanState, fixableQueryScanFindings, queryScanStatLine } from './queryScan'
 
 export interface QueryScanBannerProps {
     queryScan: QueryScanState | null
-    /** Hands the findings' fix texts to the SQL fixer, numbered. Left out where there is no editor to write into. */
-    onFixWithAI?: (instruction: string) => void
-    fixWithAILoading?: boolean
+    /** Opens the assistant on the findings. Left out where there is no editor to write into. */
+    onFixWithAI?: () => void
     className?: string
 }
 
@@ -31,12 +30,7 @@ function withInlineCode(message: string): JSX.Element {
     )
 }
 
-export function QueryScanBanner({
-    queryScan,
-    onFixWithAI,
-    fixWithAILoading,
-    className,
-}: QueryScanBannerProps): JSX.Element | null {
+export function QueryScanBanner({ queryScan, onFixWithAI, className }: QueryScanBannerProps): JSX.Element | null {
     const { showQueryScanAdvice } = useValues(uiCustomizationLogic)
 
     if (!queryScan) {
@@ -45,9 +39,7 @@ export function QueryScanBanner({
 
     const { summary, findings } = queryScan
     const showFindings = summary.status === 'done' && findings.length > 0 && showQueryScanAdvice
-    // A `filters` finding is fixed on the insight's date range, not in the SQL, so handing it to
-    // the fixer would ask it to change a query that is already right.
-    const fixableFindings = findings.filter((finding) => finding.reason !== 'filters')
+    const fixableFindings = fixableQueryScanFindings(findings)
 
     return (
         <div className={clsx('flex flex-col gap-2 shrink-0', className)} data-attr="query-scan">
@@ -65,12 +57,7 @@ export function QueryScanBanner({
                             type="secondary"
                             size="small"
                             icon={<IconSparkles />}
-                            loading={fixWithAILoading}
-                            onClick={() =>
-                                onFixWithAI(
-                                    fixableFindings.map((finding, index) => `${index + 1}. ${finding.fix}`).join('\n')
-                                )
-                            }
+                            onClick={onFixWithAI}
                             data-attr="query-scan-fix-with-ai"
                         >
                             Fix with AI

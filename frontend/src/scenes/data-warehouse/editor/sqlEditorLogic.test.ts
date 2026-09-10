@@ -32,7 +32,6 @@ import { BI_EDITOR_EVENTS } from './bi/biEditorAnalytics'
 import { biEditorLogic } from './bi/biEditorLogic'
 import { BIConfig, BIEditorView, BIField } from './bi/biEditorTypes'
 import { buildSqlNotebook, editorSceneLogic } from './editorSceneLogic'
-import { fixSQLErrorsLogic } from './fixSQLErrorsLogic'
 import { OutputTab } from './outputPaneLogic'
 import {
     activeTabMatchesUrlTarget,
@@ -2698,70 +2697,6 @@ describe('sqlEditorLogic', () => {
             act()
 
             expect(model.pushEditOperations).not.toHaveBeenCalled()
-        })
-    })
-
-    describe('AI fixer telemetry', () => {
-        const TRACE_ID = 'trace-1'
-        const INSTRUCTION = 'Add an event filter naming the events this question is about.'
-
-        it.each([
-            { name: 'an error fix that succeeds', instruction: undefined, mode: 'error', ok: true },
-            { name: 'a query scan fix that succeeds', instruction: INSTRUCTION, mode: 'query_scan', ok: true },
-            { name: 'an error fix that fails', instruction: undefined, mode: 'error', ok: false },
-            { name: 'a query scan fix that fails', instruction: INSTRUCTION, mode: 'query_scan', ok: false },
-        ])('names the mode on the outcome event for $name', async ({ instruction, mode, ok }) => {
-            useMocks({
-                post: {
-                    '/api/environments/:team_id/fix_hogql': () =>
-                        ok ? [200, { query: 'SELECT 2', trace_id: TRACE_ID }] : [500, {}],
-                },
-            })
-            logic = sqlEditorLogic({ tabId: TAB_ID, monaco: createMockMonaco(), editor: createMockEditor() })
-            logic.mount()
-            ;(posthog.capture as jest.Mock).mockClear()
-
-            fixSQLErrorsLogic.actions.fixErrors('SELECT 1', instruction ? undefined : 'boom', undefined, instruction)
-            await expectLogic(fixSQLErrorsLogic).toDispatchActions([ok ? 'fixErrorsSuccess' : 'fixErrorsFailure'])
-
-            expect(posthog.capture).toHaveBeenCalledWith(
-                ok ? 'ai-error-fixer-success' : 'ai-error-fixer-failure',
-                ok ? { trace_id: TRACE_ID, mode } : { mode }
-            )
-        })
-    })
-
-    describe('AI fixer results', () => {
-        it.each([
-            // Handing an unchanged query back to the editor opens a diff with nothing in it, but
-            // only the advice fixer answers a question by leaving the query as it is.
-            {
-                name: 'leaves the editor alone when the query scan fixer returns the query as it is',
-                error: undefined,
-                instruction: 'Add an event filter.',
-                source: null,
-            },
-            {
-                name: 'still suggests when the error fixer returns the query as it is',
-                error: 'boom',
-                instruction: undefined,
-                source: 'hogql_fixer',
-            },
-        ])('$name', async ({ error, instruction, source }) => {
-            useMocks({
-                post: {
-                    '/api/environments/:team_id/fix_hogql': () => [200, { query: 'SELECT 1', trace_id: 'trace-2' }],
-                },
-            })
-            logic = sqlEditorLogic({ tabId: TAB_ID, monaco: createMockMonaco(), editor: createMockEditor() })
-            logic.mount()
-            logic.actions.createTab('SELECT 1')
-            await expectLogic(logic).toDispatchActions(['createTab', 'updateTab'])
-
-            fixSQLErrorsLogic.actions.fixErrors('SELECT 1', error, undefined, instruction)
-            await expectLogic(fixSQLErrorsLogic).toDispatchActions(['fixErrorsSuccess'])
-
-            expect(logic.values.suggestionPayload?.source ?? null).toBe(source)
         })
     })
 

@@ -6048,15 +6048,10 @@ const api = {
         },
     },
     fixHogQLErrors: {
-        async fix(
-            query: string,
-            error?: string,
-            connectionId?: string,
-            instruction?: string
-        ): Promise<Record<string, any>> {
+        async fix(query: string, error?: string, connectionId?: string): Promise<Record<string, any>> {
             return await new ApiRequest()
                 .fixHogQLErrors()
-                .create({ data: { query, error, connection_id: connectionId, instruction } })
+                .create({ data: { query, error, connection_id: connectionId } })
         },
     },
 

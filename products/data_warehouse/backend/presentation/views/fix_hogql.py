@@ -35,16 +35,6 @@ class FixHogQLRequestSerializer(serializers.Serializer):
             "connection's tables instead of only the ClickHouse catalog."
         ),
     )
-    instruction = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        default="",
-        help_text=(
-            "The changes to apply to the query, such as adding an event filter. Several changes go "
-            "in one numbered list. Used only when `error` is empty. The tool keeps the question the "
-            "query answers the same, and returns the query unchanged when no change would."
-        ),
-    )
 
 
 class FixHogQLResponseSerializer(serializers.Serializer):
@@ -73,7 +63,7 @@ class FixHogQLViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             200: OpenApiResponse(response=FixHogQLResponseSerializer, description="The updated query."),
             400: OpenApiResponse(response=FixHogQLErrorSerializer, description="The query could not be updated."),
         },
-        summary="Fix or change a HogQL query",
+        summary="Fix a HogQL query",
     )
     def create(self, request: ValidatedRequest, *args, **kwargs) -> Response:
         from products.data_warehouse.backend.facade.api import HogQLQueryFixerTool
@@ -81,7 +71,6 @@ class FixHogQLViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         query = request.validated_data["query"]
         error = request.validated_data["error"]
         connection_id = request.validated_data["connection_id"]
-        instruction = request.validated_data["instruction"]
 
         trace_id = f"fix_hogql_query_{uuid.uuid4()}"
         user = cast(User, request.user)
@@ -94,8 +83,6 @@ class FixHogQLViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         # sees that connection's tables instead of only the ClickHouse catalog.
         if connection_id:
             fix_hogql_context["connection_id"] = connection_id
-        if instruction:
-            fix_hogql_context["instruction"] = instruction
 
         config: RunnableConfig = {
             "configurable": {

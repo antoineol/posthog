@@ -12,7 +12,7 @@ import { uiCustomizationLogic } from '~/layout/uiCustomizationLogic'
 import { QueryScanSummary, QueryScanWarning } from '~/queries/schema/schema-general'
 import { initKeaTests } from '~/test/init'
 
-import { QueryScanState, resolveQueryScan } from './queryScan'
+import { QueryScanState, queryScanAssistantPrompt, resolveQueryScan } from './queryScan'
 import { QueryScanBanner } from './QueryScanBanner'
 
 const SUMMARY: QueryScanSummary = {
@@ -82,7 +82,7 @@ describe('QueryScanBanner', () => {
         expect(screen.queryByText(FINDING.message)).not.toBeInTheDocument()
     })
 
-    it('hands the fixer a numbered list of the fixes it can make', async () => {
+    it('opens the assistant with the findings', async () => {
         seedAdviceHidden(false)
         const onFixWithAI = jest.fn()
         render(
@@ -96,7 +96,16 @@ describe('QueryScanBanner', () => {
 
         expect(screen.getByText(FINDING.message)).toBeVisible()
         await userEvent.click(screen.getByText('Fix with AI'))
-        expect(onFixWithAI).toHaveBeenCalledWith(`1. ${FINDING.fix}\n2. ${START_DATE_FINDING.fix}`)
+        expect(onFixWithAI).toHaveBeenCalled()
+    })
+
+    it('numbers every finding in the assistant prompt and asks it to explore the data first', () => {
+        const prompt = queryScanAssistantPrompt([FINDING, START_DATE_FINDING])
+
+        expect(prompt).toContain(`1. ${FINDING.message} Suggested change: ${FINDING.fix}`)
+        expect(prompt).toContain(`2. ${START_DATE_FINDING.message} Suggested change: ${START_DATE_FINDING.fix}`)
+        expect(prompt).toContain('run exploratory queries')
+        expect(prompt).toContain('-- fill in the events this question is about')
     })
 
     it('drops the fixer when every finding is fixed on the insight', () => {

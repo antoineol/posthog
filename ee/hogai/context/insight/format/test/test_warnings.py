@@ -90,9 +90,14 @@ def test_query_scan_block_carries_the_finding_and_the_standing_instruction():
         "- This query has an event filter, but it is inside an OR with another condition, so "
         "ClickHouse could not use it. Put the event filter outside the OR: "
         "`WHERE event IN ('…') AND (… OR …)`.\n"
-        "Before running it again: tell the user which filter is missing, propose a specific change "
-        "that keeps the question the same, and ask them to confirm. Do not narrow the query without "
-        "saying so.\n"
+        "First run bounded exploratory queries to see what the data looks like, each with a recent "
+        "`timestamp` bound and a `LIMIT`, for example `SELECT event, count() FROM events WHERE the "
+        "other conditions AND timestamp >= now() - interval 7 day GROUP BY event ORDER BY count() "
+        "DESC LIMIT 20`. Then tell the user which filter is missing, propose a rewrite that keeps "
+        "the question the same, and ask them to confirm before running it again. Do not narrow the "
+        "query without saying so. Never invent event names or dates: if you cannot tell which "
+        "events the question is about, say so and leave a `-- fill in the events this question is "
+        "about` comment where the filter goes.\n"
         "</query_scan_warning>\n\n"
     )
 

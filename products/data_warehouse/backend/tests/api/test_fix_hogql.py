@@ -69,33 +69,6 @@ class TestFixHogQL(APIBaseTest):
             assert captured_tool is not None
             assert captured_tool.context == expected_context
 
-    def test_instruction_without_an_error_uses_the_advice_prompt(self):
-        instruction = "Add an event filter naming the events this question is about. Change nothing else."
-
-        with (
-            mock.patch("products.data_warehouse.backend.max_tools.MaxChatOpenAI") as mock_model,
-            mock.patch.object(
-                HogQLQueryFixerTool,
-                "_parse_output",
-                return_value="select timestamp from events where event in ('$pageview')",
-            ),
-        ):
-            response = self.client.post(
-                f"/api/environments/{self.team.id}/fix_hogql/",
-                {"query": "select timestamp from events", "instruction": instruction},
-            )
-
-            assert response.status_code == 200
-            messages = mock_model.return_value.with_structured_output.return_value.invoke.call_args[0][0]
-            system_prompt, user_prompt = messages[0].content, messages[1].content
-
-        assert "You apply instructions to a HogQL query." in system_prompt
-        assert "You fix HogQL errors" not in system_prompt
-        assert instruction in user_prompt
-        assert "<error>" not in user_prompt
-        assert "Apply every one of them." in user_prompt
-        assert "return the query exactly as it is" in user_prompt
-
     def test_fixing_a_query_is_rate_limited(self):
         with (
             mock.patch.object(AIBurstRateThrottle, "allow_request", return_value=False),

@@ -121,3 +121,23 @@ export function queryScanTileTooltip(summary: QueryScanSummary, findingCount: nu
     }
     return `${tooltip} ${findingCount} things to change. Open the insight to see them.`
 }
+
+// A `filters` finding is fixed on the insight's date range, not in the SQL, so there is nothing in
+// the query for the assistant to change.
+export function fixableQueryScanFindings(findings: QueryScanWarning[]): QueryScanWarning[] {
+    return findings.filter((finding) => finding.reason !== 'filters')
+}
+
+/** The message "Fix with AI" sends to the assistant. */
+export function queryScanAssistantPrompt(findings: QueryScanWarning[]): string {
+    return [
+        'Make this query faster without changing what it answers.',
+        '',
+        'Here is what the slow query analysis found:',
+        ...findings.map((finding, index) => `${index + 1}. ${finding.message} Suggested change: ${finding.fix}`),
+        '',
+        'Before you propose a rewrite, run exploratory queries to learn what the data looks like, for example which events satisfy the other conditions in the WHERE clause over the last 7 days, and how many rows each candidate change would read. Then propose the rewritten query and say what each change does to the results.',
+        '',
+        'Never invent event names or dates. If you cannot tell which events the question is about, say so and leave a `-- fill in the events this question is about` comment in the SQL where the filter goes.',
+    ].join('\n')
+}
