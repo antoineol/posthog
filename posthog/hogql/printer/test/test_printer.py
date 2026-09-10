@@ -1455,6 +1455,34 @@ class TestPrinter(BaseTest):
         )
         self.assertEqual(json.loads(serialized), properties)
 
+    @parameterized.expand(
+        [
+            ({}, None, 0, 0),
+            ({"$groups": {"project": "p"}}, {"project": "p"}, 1, 0),
+            ({"$groups": {"organization": "o", "custom": "c"}}, {"organization": "o", "custom": "c"}, 1, 1),
+        ]
+    )
+    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=True)
+    def test_new_events_schema_groups_omit_typed_defaults(
+        self,
+        properties: dict[str, object],
+        expected_groups: dict[str, str] | None,
+        has_groups: int,
+        has_organization: int,
+    ) -> None:
+        context = HogQLContext(team_id=self.team.pk, enable_select_queries=True)
+        printed = self._expr(
+            "tuple(properties.$groups, JSONHas(properties, '$groups'), JSONHas(properties, '$groups', 'organization'), properties.$groups IS NULL, properties.$groups.organization)",
+            context,
+        )
+        [(result,)] = sync_execute(
+            f"SELECT {printed} FROM (SELECT CAST(%(raw)s, %(json_type)s) AS properties) AS events",
+            {**context.values, "raw": json.dumps(properties), "json_type": EVENTS_PROPERTIES_JSON_TYPE()},
+        )
+        self.assertEqual(json.loads(result[0]) if result[0] is not None else None, expected_groups)
+        self.assertEqual(result[1:4], (has_groups, has_organization, int(expected_groups is None)))
+        self.assertEqual(result[4], (expected_groups or {}).get("organization"))
+
     def test_instance_setting_enables_new_events_schema(self) -> None:
         # The production rollout lever is the instance setting, not the env var — a fresh context
         # must pick up a runtime flip.

@@ -579,6 +579,10 @@ def _substitute_value_read(node: ast.PropertyAccess, context: HogQLContext) -> a
             remaining_keys = deeper_keys[index:]
             break
 
+        # A dynamic parent can contain declared children with concrete types.
+        source = resolve_materialized_property_source(field_type, ".".join(subcolumn_keys), context)
+        if source is None:
+            return ast.Constant(value=None, type=ast.StringType(nullable=True))
         subcolumn_head = _json_subcolumn_value_expr(
             field_type,
             subcolumn_keys,

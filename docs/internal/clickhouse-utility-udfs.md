@@ -7,6 +7,8 @@ Flag values and person-property ordering follow the existing cleanup rules.
 
 Whole-properties reads omit empty defaults for declared array paths. Custom empty arrays and
 array positions remain intact; typed arrays cannot distinguish an absent field from an explicit empty array.
+Reads and existence checks of subobjects with declared children, such as `$groups`, run
+`JSONStripEmptyStringsAndNulls` on that subobject so absent groups do not appear as empty typed strings.
 
 See [the utility UDF README](../../clickhouse-udfs/util/README.md) for build and integration-test commands.
 The utility module and CI use Go 1.27.1, declared in `clickhouse-udfs/util/go.mod`.

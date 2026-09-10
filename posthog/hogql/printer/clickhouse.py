@@ -552,7 +552,21 @@ class ClickHousePrinter(BasePrinter):
     def _serialize_to_json_string_call(self, node: ast.Call) -> str | None:
         if node.name != "toJSONString" or len(node.args) != 1:
             return None
-        arg_type = resolve_field_type(node.args[0])
+        arg = node.args[0]
+        if isinstance(arg, ast.JsonSubcolumnAccess) and arg.access_type == "sub_object":
+            field_type = resolve_field_type(arg.expr)
+            if isinstance(field_type, ast.FieldType):
+                field = field_type.resolve_database_field(self.context)
+                subcolumns = (
+                    EVENTS_PROPERTIES_JSON_SUBCOLUMNS
+                    if field.name == "properties"
+                    else PERSON_PROPERTIES_JSON_SUBCOLUMNS
+                )
+                if any(path.startswith(".".join(arg.keys) + ".") for path in subcolumns):
+                    # Declared children materialize empty defaults even when the parent object is absent.
+                    return f"{JSON_STRIP_EMPTY_STRINGS_AND_NULLS_CLICKHOUSE_NAME}(toJSONString({self.visit(arg)}))"
+            return None
+        arg_type = resolve_field_type(arg)
         if not isinstance(arg_type, ast.FieldType):
             return None
         field_sql = super().visit_field_type(arg_type)
