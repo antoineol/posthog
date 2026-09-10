@@ -64,7 +64,8 @@ def attach_scan_slot(team: Team, response: Any) -> None:
         summary.events_in_range = lookup.slot.events_in_range
         summary.range = lookup.slot.range
         summary.killed = lookup.slot.killed
-        if lookup.slot.findings and hasattr(response, "warnings"):
+        # `log_only` collects the analysis without showing it to anyone.
+        if lookup.flag.mode == "show" and lookup.slot.findings and hasattr(response, "warnings"):
             response.warnings = [*(response.warnings or []), *lookup.slot.findings]
     except Exception:
         logger.warning("query_scan_attach_failed", team_id=team.pk, exc_info=True)
@@ -90,9 +91,8 @@ def scan_summary_with_findings(team: Team, summary: dict[str, Any], cache_key: s
             folded["events_in_range"] = lookup.slot.events_in_range
             folded["range"] = lookup.slot.range.model_dump(by_alias=True) if lookup.slot.range else None
             folded["killed"] = lookup.slot.killed
-            folded["warnings"] = [
-                finding.model_dump(by_alias=True, exclude_none=True) for finding in lookup.slot.findings
-            ]
+            findings = lookup.slot.findings if lookup.flag.mode == "show" else ()
+            folded["warnings"] = [finding.model_dump(by_alias=True, exclude_none=True) for finding in findings]
         return folded
     except Exception:
         logger.warning("query_scan_summary_fold_failed", team_id=team.pk, exc_info=True)

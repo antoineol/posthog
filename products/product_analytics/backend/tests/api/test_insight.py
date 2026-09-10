@@ -5119,7 +5119,7 @@ class TestInsightQueryScan(ClickhouseTestMixin, APIBaseTest):
     # A shared insight is read by people outside the project, and both the summary and the cache
     # key that addresses the stored analysis describe the project's own data volume.
     @patch("posthog.caching.calculate_results.calculate_for_query_based_insight")
-    def test_a_shared_insight_carries_neither_the_scan_nor_the_cache_key_that_addresses_it(
+    def test_a_shared_insight_gets_no_scan_and_no_cache_key_on_its_query_status(
         self, mock_calculate: mock.MagicMock
     ) -> None:
         insight = Insight.objects.create(

@@ -106,6 +106,19 @@ def set_done(team_id: int, cache_key: str, slot: QueryScanSlot) -> None:
     _write(team_id, cache_key, _serialize(slot), DONE_TTL_SECONDS)
 
 
+def clear(team_id: int, cache_key: str) -> None:
+    """Drop the slot, for a claim no job is coming to fill.
+
+    A pending slot nobody answers reads as an analysis in flight for its whole TTL, so the
+    response reports `pending`, the scan endpoint reports `pending`, and the next slow run of
+    the same query is told the slot already exists.
+    """
+    try:
+        query_cache_raw_client().delete(slot_key(team_id, cache_key))
+    except Exception:
+        logger.warning("query_scan_slot_clear_failed", team_id=team_id, exc_info=True)
+
+
 def claim_enqueue_budget(team_id: int) -> bool:
     """Whether this project may enqueue another scan in the current window.
 
@@ -116,9 +129,10 @@ def claim_enqueue_budget(team_id: int) -> bool:
     try:
         client = query_cache_raw_client()
         key = enqueue_counter_key(team_id)
+        # An `INCR` that creates the key and a later `EXPIRE` can be split by a worker that dies,
+        # and the counter left behind has no TTL, so the project stays capped for good.
+        client.set(key, 0, nx=True, ex=ENQUEUE_WINDOW_SECONDS)
         count = client.incr(key)
-        if count == 1:
-            client.expire(key, ENQUEUE_WINDOW_SECONDS)
         return count <= ENQUEUE_CAP_PER_WINDOW
     except Exception:
         logger.warning("query_scan_enqueue_budget_failed", team_id=team_id, exc_info=True)

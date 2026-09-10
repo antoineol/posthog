@@ -1390,7 +1390,7 @@ class TestQueryScan(APIBaseTest):
     def test_returns_the_stored_scan(self):
         self.redis_client_mock.get.return_value = A_STORED_SCAN
 
-        response = self.client.get(f"/api/environments/{self.team.id}/query/cache_key_1/scan/")
+        response = self.client.get(f"/api/environments/{self.team.id}/query/scan/cache_key_1/")
 
         self.assertEqual(response.status_code, 200, response.content)
         body = response.json()
@@ -1413,7 +1413,7 @@ class TestQueryScan(APIBaseTest):
         self.redis_client_mock.get.return_value = stored
         self.flag_mock.return_value = flag
 
-        response = self.client.get(f"/api/environments/{self.team.id}/query/cache_key_1/scan/")
+        response = self.client.get(f"/api/environments/{self.team.id}/query/scan/cache_key_1/")
 
         self.assertEqual(response.status_code, 404)
 

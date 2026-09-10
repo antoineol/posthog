@@ -294,18 +294,22 @@ class TestQueryRunner(BaseTest):
 
     @parameterized.expand(
         [
-            ("a real user", True, True),
-            ("a shared link viewer", False, False),
+            ("a real user", True, 4000.0, True),
+            ("a shared link viewer", False, 4000.0, False),
+            # Under the floor no slot is written, so the cache key would address nothing.
+            ("a run under the floor", True, 400.0, False),
         ]
     )
-    def test_a_killed_run_over_the_floor_is_analyzed_only_for_a_real_user(self, _name, real_user, expect_scan):
+    def test_a_killed_run_over_the_floor_is_analyzed_only_for_a_real_user(
+        self, _name, real_user, duration_ms, expect_scan
+    ):
         # Every retry of a killed query dies the same way, so this run is the only chance to give
         # the person advice.
         TestQueryRunner = self.setup_test_query_runner_class()
         user = self.user if real_user else _shared_link_user(self.team)
 
         def calculate_until_clickhouse_gives_up(_self):
-            record(rows_read=90, bytes_read=900, duration_ms=4000.0)
+            record(rows_read=90, bytes_read=900, duration_ms=duration_ms)
             raise ClickHouseQueryMemoryLimitExceeded()
 
         redis_client = mock.Mock()
@@ -329,6 +333,7 @@ class TestQueryRunner(BaseTest):
         if not expect_scan:
             delay.assert_not_called()
             assert getattr(raised.exception, "query_scan", None) is None
+            assert getattr(raised.exception, "cache_key", None) is None
             return
         assert delay.call_count == 1
         assert delay.call_args.kwargs["killed"] is True

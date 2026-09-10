@@ -25,6 +25,7 @@ from posthog.models.user import User
 from posthog.query_scan.flag import QueryScanFlag
 from posthog.query_scan.slot import (
     claim_enqueue_budget,
+    clear as clear_slot,
     get as get_slot,
     set_pending,
 )
@@ -145,5 +146,7 @@ def maybe_trigger_query_scan(
         # The broker can be down while ClickHouse is fine, and the result is not cached yet, so
         # failing here would throw away a run the person already waited for.
         logger.warning("query_scan_enqueue_failed", team_id=team_id, exc_info=True)
+        # Left in place, the claim above reports a pending analysis no job is coming to fill.
+        clear_slot(team_id, cache_key)
         return QueryScanTrigger(triggered=False, skipped_reason="enqueue_failed")
     return QueryScanTrigger(triggered=True, skipped_reason=None)

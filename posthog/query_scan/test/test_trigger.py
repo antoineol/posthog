@@ -58,6 +58,11 @@ class TestQueryScanTrigger(SimpleTestCase):
         self.addCleanup(delay_patcher.stop)
         self.addCleanup(reset_query_tags)
 
+    def _assert_no_slot_was_claimed(self) -> None:
+        # The enqueue counter writes through the same client, so look for the slot key itself.
+        slot_writes = [call for call in self.redis.set.call_args_list if call.args[0] == "query_scan:1:cache_key_1"]
+        assert slot_writes == []
+
     def _trigger(self, **overrides: Any):
         arguments: dict[str, Any] = {
             "flag": FLAG,
@@ -101,7 +106,7 @@ class TestQueryScanTrigger(SimpleTestCase):
         assert result.triggered is False
         assert result.skipped_reason == expected_reason
         self.delay.assert_not_called()
-        self.redis.set.assert_not_called()
+        self._assert_no_slot_was_claimed()
 
     def test_a_lost_slot_claim_does_not_enqueue_a_second_job(self) -> None:
         # Two slow runs of the same query can both find no slot, so the conditional write is what
@@ -123,6 +128,7 @@ class TestQueryScanTrigger(SimpleTestCase):
 
         assert result.triggered is False
         assert result.skipped_reason == "enqueue_failed"
+        self.redis.delete.assert_called_once_with("query_scan:1:cache_key_1")
 
     def test_a_killed_run_records_that_on_the_pending_slot(self) -> None:
         # The scan endpoint answers from this slot until the job finishes, so a stopped run that
@@ -169,6 +175,5 @@ class TestQueryScanTrigger(SimpleTestCase):
         assert json.loads(payload)["status"] == "pending"
         assert self.redis.set.call_args.kwargs["ex"] == 600
         assert self.redis.set.call_args.kwargs["nx"] is True
-        # Without the window the first minute's count would stand forever and cap the team for
-        # good.
-        self.redis.expire.assert_called_once_with("query_scan:enqueues:1", 60)
+        # A count left without a TTL would stand forever and cap the team for good.
+        self.redis.set.assert_any_call("query_scan:enqueues:1", 0, nx=True, ex=60)

@@ -2627,6 +2627,9 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
             # Same gate as the fresh path: the job cannot rebuild this run, and the summary must
             # not ride out on an error body a shared link renders.
             return
+        if stats is None or round(stats.duration_ms) < flag.floor_ms:
+            # Same floor as the fresh path: below it no slot is ever written.
+            return
         try:
             scan = maybe_trigger_query_scan(
                 flag=flag,
@@ -2644,10 +2647,13 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                 killed=True,
                 error_type=clickhouse_error_type(error),
             )
+            if not scan.triggered and scan.skipped_reason != "slot_exists":
+                # With no slot behind this cache key the scan endpoint answers 404.
+                return
             query_scan: dict[str, Any] = {
                 "mode": flag.mode,
-                "rows_read": stats.rows_read if stats else 0,
-                "duration_ms": round(stats.duration_ms) if stats else 0,
+                "rows_read": stats.rows_read,
+                "duration_ms": round(stats.duration_ms),
                 "killed": True,
             }
             if scan.triggered:

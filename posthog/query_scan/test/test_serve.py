@@ -19,11 +19,11 @@ RAISED_FLOOR = QueryScanFlag(mode="show", floor_ms=60_000, event_ratio=0.1, pers
 class TestServeScanSummary(BaseTest):
     def setUp(self) -> None:
         super().setUp()
-        redis = mock.Mock()
-        redis.get.return_value = json.dumps(
+        self.redis = mock.Mock()
+        self.redis.get.return_value = json.dumps(
             {"version": 1, "status": "pending", "thresholds": SHOW.thresholds_fingerprint}
         )
-        patcher = mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=redis)
+        patcher = mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=self.redis)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -48,6 +48,47 @@ class TestServeScanSummary(BaseTest):
             return
         assert folded is not None
         assert {key: folded[key] for key in expected} == expected
+
+    @parameterized.expand(
+        [
+            ("show", SHOW, ["no_event_filter"]),
+            ("log only", LOG_ONLY, []),
+        ]
+    )
+    def test_findings_reach_a_client_only_in_show_mode(self, _name, flag, expected_kinds) -> None:
+        self.redis.get.return_value = json.dumps(
+            {
+                "version": 1,
+                "status": "done",
+                "thresholds": SHOW.thresholds_fingerprint,
+                "findings": [
+                    {
+                        "type": "query_scan",
+                        "kind": "no_event_filter",
+                        "message": "This query read every event in its date range.",
+                        "fix": "Add an event filter naming the events this question is about.",
+                        "rows_read": 41_200,
+                        "duration_ms": 19_000,
+                    }
+                ],
+            }
+        )
+        response = SimpleNamespace(
+            query_scan=QueryScanSummary(mode="show", rows_read=41_200, duration_ms=19_000, status="pending"),
+            cache_key="cache_key_1",
+            warnings=[],
+        )
+
+        with mock.patch("posthog.query_scan.serve.get_query_scan_flag", return_value=flag):
+            attach_scan_slot(self.team, response)
+            folded = scan_summary_with_findings(self.team, self._cached_summary(), "cache_key_1")
+
+        assert [warning.kind for warning in response.warnings] == expected_kinds
+        assert response.query_scan is not None
+        assert response.query_scan.status == "done"
+        assert folded is not None
+        assert [warning["kind"] for warning in folded["warnings"]] == expected_kinds
+        assert folded["status"] == "done"
 
     def test_a_response_loses_its_summary_when_the_flag_goes_off(self) -> None:
         response = SimpleNamespace(

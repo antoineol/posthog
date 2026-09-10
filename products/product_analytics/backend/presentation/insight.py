@@ -1169,7 +1169,7 @@ class InsightSerializer(InsightBasicSerializer):
             cache_key = query_status.get("cache_key") or cache_key
         if not isinstance(summary, dict):
             return None
-        return scan_summary_with_findings(insight.team, summary, cache_key)
+        return scan_summary_with_findings(self.context["get_team"](), summary, cache_key)
 
     @extend_schema_field(serializers.ListField())
     def get_alerts(self, insight: Insight):

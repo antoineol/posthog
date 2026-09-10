@@ -634,14 +634,19 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
             404: OpenApiResponse(description="No query scan exists for this cache key."),
         },
     )
-    @action(methods=["GET"], detail=True, url_path="scan", required_scopes=["query:read"])
-    def get_query_scan(self, request: Request, pk: str, *args, **kwargs) -> Response:
+    @action(
+        methods=["GET"],
+        detail=False,
+        url_path=r"scan/(?P<cache_key>[^/]+)",
+        required_scopes=["query:read"],
+    )
+    def get_query_scan(self, request: Request, cache_key: str, *args, **kwargs) -> Response:
         # `log_only` collects the analysis without showing it to anyone, and with the flag off
         # there is no current configuration to hold a stored analysis to.
         flag = get_query_scan_flag(self.team)
         if flag is None or flag.mode != "show":
             raise NotFound("There is no query scan for this cache key.")
-        slot = query_scan_slot.get(self.team_id, pk, thresholds=flag.thresholds_fingerprint)
+        slot = query_scan_slot.get(self.team_id, cache_key, thresholds=flag.thresholds_fingerprint)
         if slot is None:
             raise NotFound("There is no query scan for this cache key.")
         return Response(
