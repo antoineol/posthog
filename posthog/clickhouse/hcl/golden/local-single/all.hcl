@@ -5765,7 +5765,7 @@ SQL
     primary_key  = ["team_id", "time_bucket", "service_name", "namespace", "environment", "severity_text", "pattern_version"]
     order_by     = ["team_id", "time_bucket", "service_name", "namespace", "environment", "severity_text", "pattern_version", "pattern"]
     partition_by = "toDate(time_bucket)"
-    ttl          = "time_bucket + toIntervalDay(42)"
+    ttl          = "time_bucket + toIntervalDay(least(retention_days, 42))"
     settings = {
       index_granularity   = "8192"
       ttl_only_drop_parts = "1"
@@ -5797,6 +5797,10 @@ SQL
     }
     column "log_count" {
       type = "SimpleAggregateFunction(sum, UInt64)"
+    }
+    column "retention_days" {
+      type    = "UInt16"
+      default = "42"
     }
     engine "replicated_aggregating_merge_tree" {
       zoo_path     = "/clickhouse/tables/noshard/posthog.logs_pattern_buckets"
@@ -5833,6 +5837,10 @@ SQL
     column "log_count" {
       type = "SimpleAggregateFunction(sum, UInt64)"
     }
+    column "retention_days" {
+      type    = "UInt16"
+      default = "42"
+    }
     engine "distributed" {
       cluster_name    = "posthog_single_shard"
       remote_database = "posthog"
@@ -5843,7 +5851,7 @@ SQL
   table "logs_volume_buckets" {
     order_by     = ["team_id", "time_bucket", "service_name", "namespace", "environment", "severity_text"]
     partition_by = "toDate(time_bucket)"
-    ttl          = "time_bucket + toIntervalDay(42)"
+    ttl          = "time_bucket + toIntervalDay(least(retention_days, 42))"
     settings = {
       index_granularity   = "8192"
       ttl_only_drop_parts = "1"
@@ -5869,6 +5877,10 @@ SQL
     }
     column "log_count" {
       type = "SimpleAggregateFunction(sum, UInt64)"
+    }
+    column "retention_days" {
+      type    = "UInt16"
+      default = "42"
     }
     engine "replicated_aggregating_merge_tree" {
       zoo_path     = "/clickhouse/tables/noshard/posthog.logs_volume_buckets"
@@ -5898,6 +5910,10 @@ SQL
     }
     column "log_count" {
       type = "SimpleAggregateFunction(sum, UInt64)"
+    }
+    column "retention_days" {
+      type    = "UInt16"
+      default = "42"
     }
     engine "distributed" {
       cluster_name    = "posthog_single_shard"
