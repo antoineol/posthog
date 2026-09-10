@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 
-import { IconClock, IconInfo, IconPulse, IconThumbsDown, IconThumbsUp, IconWarning } from '@posthog/icons'
+import { IconInfo, IconPulse, IconThumbsDown, IconThumbsUp, IconWarning } from '@posthog/icons'
 import { lemonToast } from '@posthog/lemon-ui'
 
 import { CardMeta } from 'lib/components/Cards/CardMeta'
@@ -21,6 +21,7 @@ import { LemonDivider } from 'lib/lemon-ui/LemonDivider'
 import { LemonMarkdown } from 'lib/lemon-ui/LemonMarkdown'
 import { LemonMenu } from 'lib/lemon-ui/LemonMenu'
 import { LemonTableLoader } from 'lib/lemon-ui/LemonTable/LemonTableLoader'
+import { LemonTag } from 'lib/lemon-ui/LemonTag'
 import { Link } from 'lib/lemon-ui/Link'
 import { Popover } from 'lib/lemon-ui/Popover'
 import { Spinner } from 'lib/lemon-ui/Spinner'
@@ -824,7 +825,9 @@ export function InsightMetaContent({
     ) : null
     const queryScanIndicator = queryScanTooltip ? (
         <Tooltip title={queryScanTooltip}>
-            <IconClock className="ml-1.5 text-base shrink-0 text-warning" data-attr="insight-card-query-scan" />
+            <LemonTag type="warning" size="small" className="ml-1.5 shrink-0" data-attr="insight-card-query-scan">
+                Slow query
+            </LemonTag>
         </Tooltip>
     ) : null
     const titleContent = (

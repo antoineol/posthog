@@ -2,6 +2,7 @@ import { humanFriendlyNumber } from 'lib/utils/numbers'
 
 import { QueryScanRange, QueryScanStatus, QueryScanSummary, QueryScanWarning } from '~/queries/schema/schema-general'
 import { integer } from '~/queries/schema/type-utils'
+import { DashboardTile, InsightShortId, QueryBasedInsightModel } from '~/types'
 
 // The query viewset has no generated client, so this mirrors `QueryScanResponseSerializer` in
 // `posthog/api/query.py`.
@@ -140,4 +141,50 @@ export function queryScanAssistantPrompt(findings: QueryScanWarning[]): string {
         '',
         'Never invent event names or dates. If you cannot tell which events the question is about, say so and leave a `-- fill in the events this question is about` comment in the SQL where the filter goes.',
     ].join('\n')
+}
+
+export interface QueryScanDashboardEntry {
+    tileId: number
+    shortId: InsightShortId
+    name: string
+    findingCount: number
+}
+
+export interface QueryScanDashboardSummary {
+    entries: QueryScanDashboardEntry[]
+    /** Tracks which tiles are slow and how much they have to change, so a dismissed banner returns when that set moves. */
+    signature: string
+}
+
+/** The insights on a dashboard whose last fresh run has advice for the viewer. */
+export function queryScanDashboardSummary(tiles: DashboardTile<QueryBasedInsightModel>[]): QueryScanDashboardSummary {
+    const entries: QueryScanDashboardEntry[] = []
+    for (const tile of tiles) {
+        const insight = tile.insight
+        if (!insight || insight.deleted) {
+            continue
+        }
+        // A killed run has no result to carry the scan, so it arrives on the query status instead.
+        const summary: QueryBasedInsightModel['query_scan'] = insight.query_scan ?? insight.query_status?.query_scan
+        if (summary?.mode !== 'show') {
+            continue
+        }
+        const findingCount = queryScanFindings(summary.warnings).length
+        if (findingCount === 0) {
+            continue
+        }
+        entries.push({
+            tileId: tile.id,
+            shortId: insight.short_id,
+            name: insight.name || insight.derived_name || 'Untitled',
+            findingCount,
+        })
+    }
+    return {
+        entries,
+        signature: entries
+            .map((entry) => `${entry.tileId}:${entry.findingCount}`)
+            .sort()
+            .join(','),
+    }
 }
