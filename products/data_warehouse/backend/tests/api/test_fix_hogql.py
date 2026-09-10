@@ -75,7 +75,9 @@ class TestFixHogQL(APIBaseTest):
         with (
             mock.patch("products.data_warehouse.backend.max_tools.MaxChatOpenAI") as mock_model,
             mock.patch.object(
-                HogQLQueryFixerTool, "_parse_output", return_value="select timestamp from events where event in ('…')"
+                HogQLQueryFixerTool,
+                "_parse_output",
+                return_value="select timestamp from events where event in ('$pageview')",
             ),
         ):
             response = self.client.post(

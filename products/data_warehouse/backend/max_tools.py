@@ -132,7 +132,7 @@ Apply the instructions below to the HogQL query and only return the new updated 
 - There may be several instructions, written as a numbered list. Apply every one of them.
 - Keep the question the query answers the same. The results must still mean what they meant before.
 - Don't change any part of the query the instructions don't ask you to change, including its formatting, capitalization and shorthand syntax.
-- Where an instruction needs event names you cannot know, write `('…')` in their place for the user to fill in.
+- If an instruction needs a value the query does not give you, such as event names or a date, skip that instruction. Never invent a value and never write a placeholder.
 - If no change would keep the question the same, return the query exactly as it is.
 
 {{schema_description}}
