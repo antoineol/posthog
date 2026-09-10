@@ -214,8 +214,8 @@ class AssistantQueryExecutor:
                     logger.warning(f"{TIMING_LOG_PREFIX} aexecute_query completed in {execute_elapsed:.3f}s")
 
             # The wait belongs to the path that renders the findings. A caller that takes the raw
-            # response reads neither `query_scan` nor `warnings`, so waiting there would cost the
-            # person up to five seconds of their reply for output that cannot change.
+            # response reads neither `query_scan` nor `warnings`, so waiting there would hold back
+            # the reply for output that cannot change.
             if isinstance(response_dict, dict):
                 await self._await_query_scan(response_dict)
 

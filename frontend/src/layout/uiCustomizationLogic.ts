@@ -220,8 +220,8 @@ export const uiCustomizationLogic = kea<uiCustomizationLogicType>([
             (uiConfiguration: UserUIConfiguration | null, uiCustomizationEnabled: boolean): SidebarDensity =>
                 (uiCustomizationEnabled ? uiConfiguration?.sidebar?.density : null) ?? 'comfortable',
         ],
-        // Deliberately outside the UI_CUSTOMIZATION flag: this toggle ships with the query scan,
-        // not with sidebar customization.
+        // Outside the UI_CUSTOMIZATION flag: this toggle belongs to the query scan, not to
+        // sidebar customization.
         showQueryScanAdvice: [
             (s) => [s.uiConfiguration],
             (uiConfiguration: UserUIConfiguration | null): boolean => uiConfiguration?.hide_query_scan_advice !== true,

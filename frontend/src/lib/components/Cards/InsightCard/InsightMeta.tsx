@@ -252,8 +252,8 @@ export function InsightMeta({
     // A killed run has no result to carry the scan, so it arrives on the query status instead.
     const queryScan: QueryBasedInsightModel['query_scan'] = insight.query_scan ?? insight.query_status?.query_scan
     const scanFindings = queryScanFindings(queryScan?.warnings)
-    // A pending scan already knows what the run cost, which is what the icon reports. Its advice,
-    // if there turns out to be any, arrives on a later render.
+    // A pending scan already knows what the run cost, which is what the tag says. Its advice, if
+    // there turns out to be any, arrives on a later render.
     const queryScanTooltip =
         canEditInsight &&
         queryScan?.mode === 'show' &&

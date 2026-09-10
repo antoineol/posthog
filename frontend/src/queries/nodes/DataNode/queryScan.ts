@@ -57,8 +57,7 @@ export function queryScanFindings(warnings: unknown): QueryScanWarning[] {
     return warnings.filter((warning): warning is QueryScanWarning => asObject(warning)?.type === 'query_scan')
 }
 
-// Returns nothing unless the flag mode is `show`, which keeps every surface silent while the
-// feature only logs.
+// A mode other than `show` keeps every surface silent while the scan only logs.
 export function resolveQueryScan(
     response: unknown,
     responseErrorObject: unknown,
