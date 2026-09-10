@@ -73,17 +73,18 @@ def _evaluate(team: Team) -> QueryScanFlag | None:
     """Never raises: any failure reads as off.
 
     Local evaluation sees only the properties passed here, so the flag's conditions must be on the
-    project id.
+    organization id or the project id.
     """
     try:
         distinct_id = str(team.uuid)
-        groups = {"project": str(team.id)}
-        group_properties = {
+        groups = {"organization": str(team.organization_id), "project": str(team.id)}
+        group_properties: dict[str, dict[str, object]] = {
+            "organization": {"id": str(team.organization_id)},
             "project": {
                 "id": str(team.id),
                 "created_at": team.created_at.isoformat() if team.created_at else None,
                 "uuid": team.uuid,
-            }
+            },
         }
         result = posthoganalytics.get_feature_flag_result(
             FLAG_KEY,
