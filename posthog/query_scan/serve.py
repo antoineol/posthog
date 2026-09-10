@@ -43,12 +43,11 @@ def attach_scan_slot(team: Team, response: Any) -> None:
             return
         lookup = _look_up(team, summary.duration_ms, getattr(response, "cache_key", None))
         if lookup.flag is None:
-            # The flag is the kill switch, and a cached body outlives it by up to a week, so a
-            # summary that survived a rollback goes rather than claiming a mode nobody granted.
+            # A cached body outlives the flag by up to a week, so a summary that survived a
+            # rollback goes rather than claiming a mode nobody granted.
             response.query_scan = None
             return
-        # The cached body carries the mode of the run that filled it, which an operator can have
-        # moved since.
+        # The cached body carries the mode of the run that filled it, which can have moved since.
         summary.mode = lookup.flag.mode
         if not lookup.over_floor:
             # Below the floor nothing reads the slot, so a status from the old floor cannot be

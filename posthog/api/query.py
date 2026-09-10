@@ -109,8 +109,8 @@ def _add_query_cost_headers(response: HttpResponseBase, bytes_read: int, remaini
 def _scan_extra(error: Exception) -> dict[str, Any]:
     """The scan a stopped run left on the exception, ready to put on the response.
 
-    The killed-run path sets these as plain attributes, and the error serializer reads only
-    ``extra``, so an error that does not pass through here reaches the caller without them.
+    The killed-run path sets these as plain attributes and the error serializer reads only
+    ``extra``, so an error that skips this reaches the caller without them.
     """
     return {key: value for key in ("cache_key", "query_scan") if (value := getattr(error, key, None)) is not None}
 
@@ -219,8 +219,8 @@ def required_scopes_for_query_payload(query: object) -> list[str] | None:
 
 
 class QueryScanFindingSerializer(serializers.Serializer):
-    """One finding from a query scan. Mirrors the `QueryScanWarning` schema model that the same
-    findings take when they ride on a query response's `warnings`."""
+    """One finding from a query scan. Mirrors the `QueryScanWarning` schema model the same
+    findings use when they ride on a query response's `warnings`."""
 
     type = serializers.CharField(help_text="Always `query_scan`, which tells this apart from the other warning kinds.")
     kind = serializers.CharField(
@@ -448,7 +448,7 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
                 request_user = request.user if isinstance(request.user, User) else None
                 detail, extra = enrich_hogql_validation_error(query, self.team, request_user, detail)
             # A run ClickHouse stopped carries its scan, so the client can show the advice under
-            # the error instead of only the failure.
+            # the error.
             scan_extra = _scan_extra(e)
             if scan_extra:
                 extra = {**(extra or {}), **scan_extra}
@@ -485,8 +485,8 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
             # Breaker replays were already captured when the original failure happened.
             if not getattr(e, "served_from_query_failure_cache", False):
                 capture_exception(e)
-            # The timeout and memory-limit classes land here, and they are the runs the scan
-            # exists for, so the advice has to reach the body on this path too.
+            # The timeout and memory-limit classes land here, which are the runs the scan
+            # exists for.
             scan_extra = _scan_extra(e)
             if scan_extra:
                 e.extra = {**(getattr(e, "extra", None) or {}), **scan_extra}  # type: ignore[attr-defined]
@@ -637,8 +637,7 @@ class QueryViewSet(QueryCoalescingMixin, TeamAndOrgViewSetMixin, PydanticModelMi
     @action(methods=["GET"], detail=True, url_path="scan", required_scopes=["query:read"])
     def get_query_scan(self, request: Request, pk: str, *args, **kwargs) -> Response:
         # `log_only` collects the analysis without showing it to anyone, and with the flag off
-        # there is no current configuration to hold a stored analysis to. Either way this
-        # endpoint has nothing it may serve.
+        # there is no current configuration to hold a stored analysis to.
         flag = get_query_scan_flag(self.team)
         if flag is None or flag.mode != "show":
             raise NotFound("There is no query scan for this cache key.")

@@ -129,8 +129,7 @@ class TestQueryScanJob(BaseTest):
     @parameterized.expand(
         [
             # Reads no events and pushes the filter into the persons subquery, so neither
-            # denominator has a consumer: the whole-project counts would be pure waste, and an
-            # event ratio built from them would describe a table this query never touched.
+            # denominator has a consumer.
             (
                 "no events and a filtered persons join",
                 "select count() from persons where properties.email = 'a@b.c'",
@@ -147,7 +146,7 @@ class TestQueryScanJob(BaseTest):
                 True,
             ),
             # The persons finding tells the person to read person properties off the events
-            # table, which this mode does not fill, so there is no advice the count could gate.
+            # table, which this mode does not fill.
             (
                 "an unfiltered join with persons on events off",
                 "select count() from events as e join persons as p on e.person_id = p.id where e.event = 'purchase'",

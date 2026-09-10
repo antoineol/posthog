@@ -1115,8 +1115,8 @@ class InsightSerializer(InsightBasicSerializer):
         query_status = self.insight_result(insight).query_status
         if not self.context.get("is_shared") or not isinstance(query_status, dict):
             return query_status
-        # Both fields address the stored analysis of the project's data, which a shared insight
-        # is read from outside the project.
+        # A shared insight is read from outside the project, and both fields address the stored
+        # analysis of its data.
         return {key: value for key, value in query_status.items() if key not in ("cache_key", "query_scan")}
 
     def _query_variables_mapping(self, query: dict):
@@ -1155,8 +1155,8 @@ class InsightSerializer(InsightBasicSerializer):
 
     @extend_schema_field(OpenApiTypes.ANY)
     def get_query_scan(self, insight: Insight):
-        # A shared insight is read by people outside the project, and the scan describes the
-        # project's data volume, so it stays inside.
+        # A shared insight is read from outside the project, and the scan describes the
+        # project's data volume.
         if self.context.get("is_shared"):
             return None
         result = self.insight_result(insight)
@@ -1493,7 +1493,7 @@ class InsightSerializer(InsightBasicSerializer):
         deterministic query failure from a transient one.
 
         A run ClickHouse stopped carries its scan on the exception, and the analysis is stored
-        under the cache key, so both ride along instead of being dropped with the results."""
+        under the cache key, so both ride along instead of dropping with the results."""
         query_scan = getattr(error, "query_scan", None)
         return InsightResult(
             result=None,

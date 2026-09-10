@@ -59,12 +59,11 @@ NO_PRINCIPAL = QueryScanTrigger(triggered=False, skipped_reason="no_principal")
 def is_analyzable_principal(user: object) -> TypeGuard[User]:
     """Whether the job can rebuild the run as the person who made it.
 
-    Only a real user row survives the trip to the worker. A shared-link viewer and a service
-    token bypass warehouse access control while the query runs but resolve to no user there,
-    and a run that had no principal at all is in the same position: a userless context fails
-    closed on every warehouse table, so the rebuild would be narrower than the run and could
-    only fail. The scan also describes the project's own data volume, which is why a run these
-    principals made gets no summary on its response either.
+    Only a real user row survives the trip to the worker. A shared-link viewer, a service token
+    and a run with no principal all resolve to no user there, and a userless context fails closed
+    on every warehouse table, so the rebuild would be narrower than the run. The scan also
+    describes the project's own data volume, which is why these principals get no summary on
+    their response either.
     """
     return isinstance(user, User)
 
@@ -106,14 +105,13 @@ def maybe_trigger_query_scan(
     if duration_ms < flag.floor_ms:
         return QueryScanTrigger(triggered=False, skipped_reason="below_floor")
     if is_api_key_access_method(get_query_tag_value("access_method")):
-        # An API caller has no surface to read the advice on, so analyzing costs without paying.
+        # An API caller has no surface to read the advice on, so the analysis would only cost.
         return QueryScanTrigger(triggered=False, skipped_reason="api_key")
     if not is_analyzable_principal(user):
         return NO_PRINCIPAL
     if getattr(query, "connectionId", None):
-        # A direct connection reads the external warehouse instead of ClickHouse, so the job has
-        # nothing to explain or count and would park a pending slot for an analysis that cannot
-        # happen.
+        # A direct connection reads the external warehouse instead of ClickHouse, so the job
+        # would park a pending slot for an analysis that cannot happen.
         return QueryScanTrigger(triggered=False, skipped_reason="direct_connection")
     if not cacheable:
         return QueryScanTrigger(triggered=False, skipped_reason="not_cacheable")
@@ -125,8 +123,7 @@ def maybe_trigger_query_scan(
         # Another slow run of the same query claimed the slot between the read above and here.
         return QueryScanTrigger(triggered=False, skipped_reason="slot_exists")
 
-    # The query runner imports this module, and the task's job imports the query runner, so a
-    # module-level import here would close that cycle.
+    # A module-level import would close the runner, trigger, task, job, runner cycle.
     from posthog.tasks.query_scan import analyze_query_scan  # noqa: PLC0415
 
     try:
@@ -145,9 +142,8 @@ def maybe_trigger_query_scan(
             error_type=error_type,
         )
     except Exception:
-        # The publish reaches the broker, which can be down while ClickHouse is fine. The run
-        # already cost the person its full duration and is not cached yet, so failing here would
-        # throw away a result they waited for. The next slow run enqueues again.
+        # The broker can be down while ClickHouse is fine, and the result is not cached yet, so
+        # failing here would throw away a run the person already waited for.
         logger.warning("query_scan_enqueue_failed", team_id=team_id, exc_info=True)
         return QueryScanTrigger(triggered=False, skipped_reason="enqueue_failed")
     return QueryScanTrigger(triggered=True, skipped_reason=None)

@@ -22,8 +22,7 @@ FLAG = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=
 
 
 def _shared_link_user() -> SharedLinkUser:
-    # Bypasses warehouse access control while the query runs, but carries no id the worker can
-    # resolve back, so the job would rebuild the query as no user at all.
+    # Carries no id the worker can resolve back, so the job would rebuild the query as no user.
     return SharedLinkUser(SimpleNamespace(enabled=True, team_id=1))  # type: ignore[arg-type]
 
 

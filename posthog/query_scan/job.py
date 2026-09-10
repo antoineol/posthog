@@ -1,11 +1,8 @@
-"""What the query scan job does, away from Celery so it can be called directly in a test.
+"""The query scan job, kept out of Celery so a test can call it directly.
 
-The job rebuilds the query the person ran, asks ClickHouse how it planned to read it, counts
-the project's events over the same range, runs the structural checks, and stores the result in
-the scan slot. It runs on the offline pool, once per query per slot lifetime.
-
-The EXPLAIN and the events count go through ``sync_execute`` here; the person count is a HogQL
-query, so a test patches both.
+It rebuilds the query the person ran, asks ClickHouse how it planned to read it, counts the
+project's events over the same range, runs the checks, and stores the result in the scan slot.
+It runs on the offline pool, once per query per slot lifetime.
 """
 
 from __future__ import annotations
@@ -47,9 +44,8 @@ from posthog.query_scan.tree import find_events_reads
 
 logger = structlog.get_logger(__name__)
 
-# Every ClickHouse read this job makes carries it. `sync_execute` sets no cap of its own, and
-# the production socket waits effectively forever, so without this a statement ClickHouse does
-# not return holds a slot on a queue sized to protect ClickHouse.
+# `sync_execute` sets no cap of its own and the production socket waits effectively forever, so
+# without this a statement ClickHouse never returns would hold a queue slot indefinitely.
 MAX_EXECUTION_TIME_SECONDS = 60
 
 
@@ -108,8 +104,8 @@ def _run(job: QueryScanJob, started: float) -> None:
 
     modifiers = HogQLQueryModifiers.model_validate(job.modifiers) if job.modifiers else None
     runner = get_query_runner(job.query, job.team, modifiers=modifiers, user=job.user)
-    # A direct connection reads the external warehouse, not ClickHouse, and the Trino engine is
-    # only reachable through one, so there is nothing here to explain or count.
+    # A direct connection reads the external warehouse over Trino, not ClickHouse, so there is
+    # nothing here to explain or count.
     if getattr(runner.query, "connectionId", None):
         return
 
@@ -165,9 +161,8 @@ def _analyze_hogql(runner: HogQLQueryRunner, job: QueryScanJob, thresholds: Scan
     plan = _explain(sql, context, job.team)
     has_filters_placeholder = _has_open_filters_placeholder(runner.query.query, runner.query.filters)
     start_date = check_start_date(prepared_tree, has_filters_placeholder=has_filters_placeholder)
-    # A query that reads no events has no denominator to measure against: every check that
-    # would use one is already quiet, and the project's whole event count is not what such a
-    # query read, so counting it would only store a ratio that means nothing.
+    # A query that reads no events has no denominator. The project's whole event count is not
+    # what it read, so the ratio would mean nothing.
     reads_events = bool(find_events_reads(prepared_tree))
     retention_months = events_retention_months_for_team(job.team, job.team.pk)
     counted = (
@@ -208,10 +203,8 @@ def _analyze_hogql(runner: HogQLQueryRunner, job: QueryScanJob, thresholds: Scan
 def _person_rows_for_gate(job: QueryScanJob, clickhouse_context: HogQLContext) -> int | None:
     """Person versions for the project, or None when the persons finding cannot fire anyway.
 
-    The count only decides the gate on an unfiltered join, so a query that pushes a filter into
-    the subquery, or never joins persons at all, does not need it. With persons-on-events off
-    there is nothing to advise either: the finding tells the person to read person properties
-    from the events table, and that mode does not put them there.
+    The count only gates an unfiltered join. With persons-on-events off the finding's advice,
+    to read person properties from the events table, does not apply either.
     """
     if job.team.person_on_events_mode == PersonsOnEventsMode.DISABLED:
         return None
@@ -224,8 +217,7 @@ def _analyze_settings(runner: QueryRunner, job: QueryScanJob, thresholds: ScanTh
     resolved = _resolved_date_range(runner)
     date_from, date_to = resolved.date_from, resolved.date_to
     retention_months = events_retention_months_for_team(job.team, job.team.pk)
-    # Without a resolved range there is nothing to measure the read against, and the only check
-    # that would still fire needs a date range on the insight to fire at all.
+    # Without a resolved range there is nothing to measure the read against.
     counted = (
         _count_events_in_range(
             job.team,
@@ -258,8 +250,8 @@ def _analyze_settings(runner: QueryRunner, job: QueryScanJob, thresholds: ScanTh
 
 @frozen
 class _ResolvedDateRange:
-    """The range a picker-built insight resolved to: the dates for the copy, and the exact
-    instants for the count, ``upper`` exclusive."""
+    """The range a picker-built insight resolved to: dates for the copy, exact instants for the
+    count, with ``upper`` exclusive."""
 
     date_from: date | None
     date_to: date | None
@@ -268,8 +260,8 @@ class _ResolvedDateRange:
 
 
 def _resolved_date_range(runner: QueryRunner) -> _ResolvedDateRange:
-    """The range the runner resolved for the insight, which is where a picker-built query says
-    what it covers. Runners without one report no range."""
+    """The range the runner resolved, which is where a picker-built query says what it covers.
+    Runners without one report no range."""
     query_date_range = getattr(runner, "query_date_range", None)
     if query_date_range is None:
         return _ResolvedDateRange(date_from=None, date_to=None)
@@ -285,9 +277,9 @@ def _has_open_filters_placeholder(query: str, filters: HogQLFilters | None) -> b
     """Whether the query asks for a date range through ``{filters}`` and nobody supplied one.
 
     The placeholder then expands to no bound at all, so the missing start date is on the insight
-    or the dashboard rather than in the SQL, and the advice has to say so. Only the predicate
-    forms count: ``{filters.interval(...)}`` and ``{filters.breakdown(...)}`` substitute a value,
-    so no date range on the insight can bound the query through them.
+    rather than in the SQL. Only the predicate forms count: ``{filters.interval(...)}`` and
+    ``{filters.breakdown(...)}`` substitute a value, so no date range can bound the query
+    through them.
     """
     try:
         if not find_placeholders(parse_select(query)).has_date_filters:
@@ -334,17 +326,15 @@ def _count_events_in_range(
 ) -> _EventCount:
     """How many events the project holds over the range the query read.
 
-    The events table is sorted by team and day, so this reads the key columns for the project's
-    granules in range and nothing else. The exact instants are used where the query gave them, so
-    an explicit range is not counted a day wide; the day-rounded dates stand in when only they are
-    known. A missing bound is left out of the filter, and the earliest timestamp stands in for a
-    missing lower bound in the copy.
+    The events table is sorted by team and day, so this reads only the key columns for the
+    project's granules in range. Exact instants are used where the query gave them, so an
+    explicit range is not counted a day wide. A missing bound is left out of the filter.
     """
     conditions = ["team_id = %(team_id)s"]
     arguments: dict[str, Any] = {"team_id": team.pk}
     if retention_months is not None:
-        # The number reaches the person, and the printer floors every events scan the same way,
-        # so counting past the floor would report events the query itself can no longer read.
+        # The printer floors every events scan the same way, so counting past the floor would
+        # report events the query itself can no longer read.
         conditions.append("timestamp > now() - toIntervalMonth(%(retention_months)s)")
         arguments["retention_months"] = retention_months
     if lower is not None:
@@ -380,8 +370,8 @@ def _count_events_in_range(
 def _count_person_rows(team: Team) -> int:
     """Person versions for the project, which is what the deduplicating subquery reads.
 
-    `raw_persons` is every row of the ClickHouse persons table, old versions included, so the
-    count matches what the subquery scans. Personhog counts persons, not versions.
+    ``raw_persons`` keeps old versions, so the count matches what the subquery scans. Personhog
+    counts persons, not versions.
     """
     with tags_context(product=Product.PRODUCT_ANALYTICS, feature=Feature.QUERY_SCAN):
         response = execute_hogql_query(
@@ -421,8 +411,8 @@ def _retention_floor_date(retention_months: int | None) -> date | None:
 
 
 def _report(job: QueryScanJob, analysis: _Analysis, *, query_kind: str | None, job_ms: int) -> None:
-    """Send `query scan analyzed`, findings or not. A run with no findings is the record of an
-    expensive query no check explains, which is what says which check to write next."""
+    """Send `query scan analyzed`, findings or not. A run with no findings records an expensive
+    query no check explains yet, which is what says which check to write next."""
     result = analysis.result
     properties = {
         "cache_key": job.cache_key,

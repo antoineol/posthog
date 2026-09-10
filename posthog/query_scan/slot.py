@@ -30,8 +30,8 @@ SLOT_VERSION = 1
 PENDING_TTL_SECONDS = 10 * 60
 DONE_TTL_SECONDS = 30 * 24 * 60 * 60
 
-# How many scans one project may enqueue per window. The job runs on a queue sized to protect
-# ClickHouse, so a project whose dashboards are all slow must not be able to fill it.
+# The job runs on a queue sized to protect ClickHouse, so one project whose dashboards are all
+# slow must not be able to fill it.
 ENQUEUE_CAP_PER_WINDOW = 10
 ENQUEUE_WINDOW_SECONDS = 60
 
@@ -67,14 +67,13 @@ def get(team_id: int, cache_key: str, *, thresholds: str | None = None) -> Query
     """The stored slot, or None when there is none to serve.
 
     ``thresholds`` is the fingerprint of the gates in force now. A done slot analyzed under other
-    gates holds findings this configuration would not produce, so it reads as no slot and the next
-    slow run analyzes again. Omit it to read the slot as stored. A pending slot is never rejected:
-    the job reads the current gates itself, so rejecting it would only enqueue a second one.
+    gates reads as absent, so the next slow run analyzes again; omit it to read the slot as
+    stored. A pending slot is never rejected, because the job reads the current gates itself.
     """
     try:
         # The primary, not the read replica the query cache reads through. The response that
-        # enqueues a scan reads the slot back in the same request, and the skip test that stops a
-        # second job reads what an earlier run wrote. A replica behind the write drops both.
+        # enqueues a scan reads the slot back in the same request, so a replica behind the write
+        # would miss it.
         raw = query_cache_raw_client().get(slot_key(team_id, cache_key))
         if raw is None:
             return None
@@ -97,8 +96,8 @@ def set_pending(team_id: int, cache_key: str, *, killed: bool = False) -> bool:
     """
     value: dict[str, Any] = {"status": "pending", "enqueued_at": _now()}
     if killed:
-        # The scan endpoint answers from this slot until the job finishes and reports the field
-        # straight, so a run ClickHouse stopped must not read as one that completed.
+        # The scan endpoint answers from this slot until the job finishes, so a run ClickHouse
+        # stopped must not read as one that completed.
         value["killed"] = True
     return _write(team_id, cache_key, value, PENDING_TTL_SECONDS, nx=True)
 
@@ -110,9 +109,9 @@ def set_done(team_id: int, cache_key: str, slot: QueryScanSlot) -> None:
 def claim_enqueue_budget(team_id: int) -> bool:
     """Whether this project may enqueue another scan in the current window.
 
-    One dashboard refresh can produce hundreds of distinct slow queries, so without a cap a
-    single project can take the whole analytics queue. A Redis failure allows the enqueue,
-    because the slot claim that follows reads the same client and stops there instead.
+    One dashboard refresh can produce hundreds of distinct slow queries, so without a cap one
+    project can take the whole analytics queue. A Redis failure allows the enqueue, because the
+    slot claim that follows reads the same client and stops there instead.
     """
     try:
         client = query_cache_raw_client()

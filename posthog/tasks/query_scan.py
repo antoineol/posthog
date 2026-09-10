@@ -13,9 +13,8 @@ from posthog.scoping_audit import skip_team_scope_audit
 # The queue cache warming and lazy precompute use, so a burst of analyses cannot overwhelm
 # ClickHouse. The job is advisory, so a lost run costs nothing and there is no retry.
 #
-# The copy dies with the pending slot that claims it. Outliving that claim would let the next
-# slow run of the same query enqueue a second copy, and a backlog would then collect one copy
-# per query per claim lifetime, all of them re-running the same analysis on recovery.
+# `expires` matches the pending slot's lifetime. A task outliving its claim would let the next
+# slow run enqueue a second copy, and a backlog would collect one per query per claim lifetime.
 @shared_task(ignore_result=True, queue=CeleryQueue.ANALYTICS_LIMITED.value, expires=PENDING_TTL_SECONDS)
 @skip_team_scope_audit  # Team and User are not team-scoped models
 def analyze_query_scan(

@@ -139,8 +139,8 @@ class Feature(StrEnum):
     ENDPOINT_LAST_EXECUTION = "endpoint_last_execution"  # Usage tab query_log lookup
     POSTHOG_AI = "posthog_ai"
     MCP = "mcp"
-    # The offline analysis of a slow query: one EXPLAIN and two counts, run once per query per
-    # scan slot lifetime rather than per request.
+    # The offline analysis of a slow query: one EXPLAIN and up to two counts per scan slot,
+    # not per request.
     QUERY_SCAN = "query_scan"
     SEMANTIC_SEARCH = "semantic_search"
     # A 30 day aggregate that runs on every AI observability dashboard mount and trace view, so its

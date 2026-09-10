@@ -2339,7 +2339,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                         analytics_props=analytics_props,
                     )
                     # A fresh run of a query analyzed earlier still has a done slot, so this is
-                    # where the findings reach a recomputed response.
+                    # where its findings reach the recomputed response.
                     self._serve_query_scan(fresh_response, user)
                     return fresh_response
                 except Exception as exc:
@@ -2519,14 +2519,13 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
             # Attach before the cache write, so a hit serves the same numbers as the run that
             # produced them. Guarded like `warnings` above: a response class without the field
             # would fail pydantic validation on the extra key after the cache was already written.
-            # The whole block is skipped for an unflagged team, which is what keeps the query
-            # serialization the enqueue needs off every other team's path.
+            # Skipped entirely for an unflagged team, which keeps the query serialization the
+            # enqueue needs off every other team's path.
             scan = QUERY_SCAN_FLAG_OFF
             if query_scan_flag is not None and query_stats is not None and "query_scan" in CachedResponse.model_fields:
                 if not is_analyzable_principal(user):
-                    # The job cannot rebuild this run, so there is nothing to enqueue, and the
-                    # numbers stay off the response because a shared link is read from outside
-                    # the project.
+                    # The job cannot rebuild this run, and the numbers stay off the response
+                    # because a shared link is read from outside the project.
                     scan = QUERY_SCAN_NO_PRINCIPAL
                 else:
                     query_scan: dict[str, Any] = {
@@ -2540,9 +2539,8 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
                         stats=query_stats,
                         team_id=self.team.pk,
                         cache_key=cache_key,
-                        # Dashboard filters, tile overrides and variable overrides are already
-                        # applied here, which is why the cache key is the right identity for the
-                        # analysis.
+                        # Dashboard and tile overrides are already applied here, so the cache key
+                        # is the right identity for the analysis.
                         query=self.query,
                         modifiers=self.modifiers,
                         insight_id=insight_id,
@@ -2597,8 +2595,8 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
             return CachedResponse(**fresh_response_dict)
 
     def _serve_query_scan(self, response: Any, user: Optional[User]) -> None:
-        """Fold the stored analysis into an outgoing response, or take the field off it when the
-        reader is not the person the run was analyzed for.
+        """Fold the stored analysis into an outgoing response, or take the field off it for a
+        reader the run was not analyzed for.
 
         A cached body written for a real user still carries the summary, so a shared-link viewer
         of the same insight would otherwise be served the project's data volume from the cache.

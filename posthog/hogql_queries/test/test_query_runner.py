@@ -165,8 +165,8 @@ def _calculate_recording_clickhouse_stats(_self):
 
 
 def _shared_link_user(team: Team) -> User:
-    # An anonymous viewer of a shared insight. The share link is its authorization, so the query
-    # runs, but there is no user row the worker could resolve back.
+    # The share link is its authorization, so the query runs, but there is no user row the worker
+    # could resolve back.
     configuration = SharingConfiguration.objects.create(team=team, enabled=True)
     return cast("User", SharedLinkUser(configuration))
 
@@ -219,8 +219,8 @@ class TestQueryRunner(BaseTest):
         [
             ("flag on for a real user", _QUERY_SCAN_FLAG_SHOW, True, True),
             ("flag off", None, True, False),
-            # The worker resolves no user for a shared-link viewer, so the analysis could never
-            # run, and the summary describes the project's data volume to someone outside it.
+            # The worker resolves no user for a shared-link viewer, and the summary describes the
+            # project's data volume to someone outside it.
             ("flag on for a shared link viewer", _QUERY_SCAN_FLAG_SHOW, False, False),
         ]
     )
@@ -299,8 +299,8 @@ class TestQueryRunner(BaseTest):
         ]
     )
     def test_a_killed_run_over_the_floor_is_analyzed_only_for_a_real_user(self, _name, real_user, expect_scan):
-        # Every retry of a killed query dies the same way, so this run is the only chance to
-        # give the person advice; the exception has to carry it to the API layers above.
+        # Every retry of a killed query dies the same way, so this run is the only chance to give
+        # the person advice.
         TestQueryRunner = self.setup_test_query_runner_class()
         user = self.user if real_user else _shared_link_user(self.team)
 
