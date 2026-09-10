@@ -63,7 +63,7 @@ class TestQueryScanFlag(SimpleTestCase):
             ("boolean flag", "on", None, None),
         ]
     )
-    def test_thresholds_fall_back_to_defaults_for_a_bad_payload(
+    def test_reads_the_variant_and_falls_back_to_default_thresholds(
         self, _name: str, variant: str, payload: object, expected: tuple[int, float, float] | None
     ) -> None:
         with patch.object(flag.posthoganalytics, "get_feature_flag_result") as get_result:

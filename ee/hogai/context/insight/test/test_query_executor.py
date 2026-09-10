@@ -358,46 +358,24 @@ class TestAssistantQueryExecutor(NonAtomicBaseTest):
         mock_get_slot.assert_not_called()
         self.assertNotIn("<query_scan_warning>", str(context.exception))
 
-    @patch("ee.hogai.context.insight.query_executor.get_query_scan_flag", return_value=None)
+    @patch("ee.hogai.context.insight.query_executor.get_query_scan_flag")
     @patch("ee.hogai.context.insight.query_executor.get_query_scan_slot")
     @patch("ee.hogai.context.insight.query_executor.process_query_dict")
-    async def test_run_and_format_query_does_not_wait_for_a_scan_it_cannot_show(
-        self, mock_process_query, mock_get_slot, _mock_flag
-    ):
-        # Waiting costs up to five seconds of the reply. A team the flag no longer matches has no
-        # surface for the findings, so the wait would buy nothing.
+    async def test_no_wait_for_a_scan_nobody_will_read(self, mock_process_query, mock_get_slot, mock_flag):
         mock_process_query.return_value = {
             "results": [[1]],
             "columns": ["count"],
             "cache_key": "cache_abc",
             "query_scan": {"mode": "show", "rows_read": 4_200_000_000, "duration_ms": 12_300, "status": "pending"},
         }
+        query = AssistantHogQLQuery(query="SELECT count() FROM events")
 
-        await self.query_runner.arun_and_format_query(AssistantHogQLQuery(query="SELECT count() FROM events"))
-
-        mock_get_slot.assert_not_called()
-
-    @patch("ee.hogai.context.insight.query_executor.get_query_scan_flag", return_value=_SCAN_FLAG)
-    @patch("ee.hogai.context.insight.query_executor.get_query_scan_slot")
-    @patch("ee.hogai.context.insight.query_executor.process_query_dict")
-    async def test_execute_query_does_not_wait_for_a_scan_its_caller_discards(
-        self, mock_process_query, mock_get_slot, _mock_flag
-    ):
-        # Tools such as the trace readers take the raw response and read only `results`, so the
-        # wait would cost them up to five seconds of the reply for output that cannot change.
-        mock_process_query.return_value = {
-            "results": [[1]],
-            "columns": ["count"],
-            "cache_key": "cache_abc",
-            "query_scan": {
-                "mode": "show",
-                "rows_read": 4_200_000_000,
-                "duration_ms": 12_300,
-                "status": "pending",
-            },
-        }
-
-        await self.query_runner.aexecute_query(AssistantHogQLQuery(query="SELECT count() FROM events"))
+        # A team the flag no longer matches has no surface for the findings.
+        mock_flag.return_value = None
+        await self.query_runner.arun_and_format_query(query)
+        # Tools such as the trace readers take the raw response and read only `results`.
+        mock_flag.return_value = _SCAN_FLAG
+        await self.query_runner.aexecute_query(query)
 
         mock_get_slot.assert_not_called()
 

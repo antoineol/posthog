@@ -1,7 +1,13 @@
 import { QueryScanSummary, QueryScanWarning } from '~/queries/schema/schema-general'
 import { DashboardTile, InsightShortId, QueryBasedInsightModel } from '~/types'
 
-import { queryScanDashboardSummary, queryScanTileStatLine } from './queryScan'
+import {
+    queryScanAssistantPrompt,
+    queryScanDashboardSummary,
+    queryScanStatLine,
+    queryScanTileStatLine,
+    resolveQueryScan,
+} from './queryScan'
 
 const SUMMARY: QueryScanSummary = {
     mode: 'show',
@@ -18,6 +24,13 @@ const FINDING: QueryScanWarning = {
     clause: "event != 'x'",
     rows_read: 8_400_000_000,
     duration_ms: 19_000,
+}
+
+const START_DATE_FINDING: QueryScanWarning = {
+    ...FINDING,
+    kind: 'no_start_date',
+    message: 'This query has no start date.',
+    fix: 'Add a start date on `timestamp`.',
 }
 
 function tile(id: number, insight: Partial<QueryBasedInsightModel> | null): DashboardTile<QueryBasedInsightModel> {
@@ -38,56 +51,74 @@ function slowInsight(
 }
 
 describe('queryScan', () => {
-    describe('queryScanDashboardSummary', () => {
-        it('names only the insights whose last run has advice', () => {
-            const { entries } = queryScanDashboardSummary([
-                tile(1, null),
-                tile(2, slowInsight('aaa', 'Active users', 2)),
-                tile(3, slowInsight('bbb', 'Fast enough', 0)),
-                tile(4, slowInsight('ccc', 'Only logging', 1, { mode: 'log_only' })),
-                tile(5, { ...slowInsight('ddd', 'Deleted', 1), deleted: true }),
-                tile(6, { short_id: 'eee' as InsightShortId, derived_name: 'Pageview count' }),
-            ])
-
-            expect(entries).toEqual([{ tileId: 2, shortId: 'aaa', name: 'Active users', findingCount: 2 }])
-        })
-
-        it('falls back to the derived name, then to Untitled', () => {
-            const { entries } = queryScanDashboardSummary([
-                tile(1, { ...slowInsight('aaa', '', 1), derived_name: 'Pageview count' }),
-                tile(2, slowInsight('bbb', '', 1)),
-            ])
-
-            expect(entries.map((entry) => entry.name)).toEqual(['Pageview count', 'Untitled'])
-        })
-
-        it('signs the slow tiles and their counts, ignoring tile order', () => {
-            const first = tile(2, slowInsight('aaa', 'Active users', 2))
-            const second = tile(10, slowInsight('bbb', 'Slow SQL', 1))
-
-            expect(queryScanDashboardSummary([first, second]).signature).toEqual(
-                queryScanDashboardSummary([second, first]).signature
-            )
-            expect(queryScanDashboardSummary([first, second]).signature).not.toEqual(
-                queryScanDashboardSummary([first, tile(10, slowInsight('bbb', 'Slow SQL', 3))]).signature
-            )
-        })
+    it('reads no scan off a run the team only logs', () => {
+        expect(resolveQueryScan({ query_scan: { ...SUMMARY, mode: 'log_only' } }, null, null)).toBeNull()
     })
 
-    describe('queryScanTileStatLine', () => {
-        it.each([
-            {
-                label: 'a run that finished',
-                summary: {},
-                expected: 'This tile read 8,400,000,000 rows in 19.0 s on its last run.',
-            },
-            {
-                label: 'a run ClickHouse stopped',
-                summary: { killed: true },
-                expected: "ClickHouse stopped this tile's last run after 19.0 s, having read 8,400,000,000 rows.",
-            },
-        ])('reports $label', ({ summary, expected }) => {
-            expect(queryScanTileStatLine({ ...SUMMARY, ...summary })).toEqual(expected)
-        })
+    it.each([
+        ['a run that finished', {}, 'Read 8,400,000,000 rows in 19.0 s.'],
+        [
+            'a run whose analysis counted the events in the date range',
+            { events_in_range: 1_000 },
+            'Read 8,400,000,000 rows in 19.0 s. 1,000 events in the date range.',
+        ],
+        [
+            'a run ClickHouse stopped',
+            { killed: true },
+            'ClickHouse stopped it after 19.0 s, having read 8,400,000,000 rows.',
+        ],
+    ] as [string, Partial<QueryScanSummary>, string][])('describes %s', (_label, summary, expected) => {
+        expect(queryScanStatLine({ ...SUMMARY, ...summary })).toEqual(expected)
+    })
+
+    it.each([
+        ['a run that finished', {}, 'This tile read 8,400,000,000 rows in 19.0 s on its last run.'],
+        [
+            'a run ClickHouse stopped',
+            { killed: true },
+            "ClickHouse stopped this tile's last run after 19.0 s, having read 8,400,000,000 rows.",
+        ],
+    ] as [string, Partial<QueryScanSummary>, string][])('describes %s on a tile', (_label, summary, expected) => {
+        expect(queryScanTileStatLine({ ...SUMMARY, ...summary })).toEqual(expected)
+    })
+
+    it('numbers every finding in the assistant prompt and asks it to explore the data first', () => {
+        const prompt = queryScanAssistantPrompt([FINDING, START_DATE_FINDING])
+
+        expect(prompt).toContain(`1. ${FINDING.message} Suggested change: ${FINDING.fix}`)
+        expect(prompt).toContain(`2. ${START_DATE_FINDING.message} Suggested change: ${START_DATE_FINDING.fix}`)
+        expect(prompt).toContain('run exploratory queries')
+        expect(prompt).toContain('-- fill in the events this question is about')
+    })
+
+    it('names only the insights whose last run has advice', () => {
+        const { entries } = queryScanDashboardSummary([
+            tile(1, null),
+            tile(2, slowInsight('aaa', 'Active users', 2)),
+            tile(3, slowInsight('bbb', 'Fast enough', 0)),
+            tile(4, slowInsight('ccc', 'Only logging', 1, { mode: 'log_only' })),
+            tile(5, { ...slowInsight('ddd', 'Deleted', 1), deleted: true }),
+            tile(6, { short_id: 'eee' as InsightShortId, derived_name: 'Never run' }),
+            tile(7, { ...slowInsight('fff', '', 1), derived_name: 'Pageview count' }),
+            tile(8, slowInsight('ggg', '', 1)),
+        ])
+
+        expect(entries).toEqual([
+            { tileId: 2, shortId: 'aaa', name: 'Active users', findingCount: 2 },
+            { tileId: 7, shortId: 'fff', name: 'Pageview count', findingCount: 1 },
+            { tileId: 8, shortId: 'ggg', name: 'Untitled', findingCount: 1 },
+        ])
+    })
+
+    it('signs the slow tiles and their counts, ignoring tile order', () => {
+        const first = tile(2, slowInsight('aaa', 'Active users', 2))
+        const second = tile(10, slowInsight('bbb', 'Slow SQL', 1))
+
+        expect(queryScanDashboardSummary([first, second]).signature).toEqual(
+            queryScanDashboardSummary([second, first]).signature
+        )
+        expect(queryScanDashboardSummary([first, second]).signature).not.toEqual(
+            queryScanDashboardSummary([first, tile(10, slowInsight('bbb', 'Slow SQL', 3))]).signature
+        )
     })
 })
