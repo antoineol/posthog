@@ -18,6 +18,19 @@ export interface QueryScanBannerProps {
     className?: string
 }
 
+/** A finding marks SQL with backticks, the way the assistant reads it. Render those spans as code. */
+function withInlineCode(message: string): JSX.Element {
+    return (
+        <>
+            {message
+                .split('`')
+                .map((part, index) =>
+                    index % 2 === 1 ? <code key={index}>{part}</code> : <span key={index}>{part}</span>
+                )}
+        </>
+    )
+}
+
 export function QueryScanBanner({
     queryScan,
     onFixWithAI,
@@ -43,14 +56,7 @@ export function QueryScanBanner({
                 <LemonBanner type="warning">
                     <ul className="list-disc pl-5">
                         {findings.map((finding, index) => (
-                            <li key={`${finding.kind}-${index}`}>
-                                {finding.message}
-                                {finding.clause && (
-                                    <div className="mt-1 overflow-x-auto">
-                                        <code className="text-xs whitespace-pre">{finding.clause}</code>
-                                    </div>
-                                )}
-                            </li>
+                            <li key={`${finding.kind}-${index}`}>{withInlineCode(finding.message)}</li>
                         ))}
                     </ul>
                     {onFixWithAI && fixableFindings.length > 0 && (
