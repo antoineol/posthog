@@ -1896,24 +1896,6 @@ database "posthog" {
     column "person_id" {
       type = "UUID"
     }
-    column "person_properties" {
-      type = "String"
-    }
-    column "group0_properties" {
-      type = "String"
-    }
-    column "group1_properties" {
-      type = "String"
-    }
-    column "group2_properties" {
-      type = "String"
-    }
-    column "group3_properties" {
-      type = "String"
-    }
-    column "group4_properties" {
-      type = "String"
-    }
     column "inserted_at" {
       type    = "DateTime64(6, 'UTC')"
       default = "timestamp"
@@ -4666,6 +4648,9 @@ database "posthog" {
     column "retention_period_days" {
       type = "SimpleAggregateFunction(max, Nullable(Int64))"
     }
+    column "snapshot_mode" {
+      type = "AggregateFunction(argMin, LowCardinality(Nullable(String)), DateTime64(6, 'UTC'))"
+    }
     engine "distributed" {
       cluster_name    = "posthog"
       remote_database = "posthog"
@@ -5890,24 +5875,6 @@ database "posthog" {
     }
     column "person_id" {
       type = "UUID"
-    }
-    column "person_properties" {
-      type = "String"
-    }
-    column "group0_properties" {
-      type = "String"
-    }
-    column "group1_properties" {
-      type = "String"
-    }
-    column "group2_properties" {
-      type = "String"
-    }
-    column "group3_properties" {
-      type = "String"
-    }
-    column "group4_properties" {
-      type = "String"
     }
     column "inserted_at" {
       type    = "DateTime64(6, 'UTC')"
@@ -7392,6 +7359,9 @@ database "posthog" {
     }
     column "retention_period_days" {
       type = "SimpleAggregateFunction(max, Nullable(Int64))"
+    }
+    column "snapshot_mode" {
+      type = "AggregateFunction(argMin, LowCardinality(Nullable(String)), DateTime64(6, 'UTC'))"
     }
     engine "replicated_aggregating_merge_tree" {
       zoo_path     = "/clickhouse/tables/{shard}/posthog.session_replay_events"
@@ -9550,6 +9520,9 @@ database "posthog" {
     }
     column "snapshot_library" {
       type = "AggregateFunction(argMin, Nullable(String), DateTime64(6, 'UTC'))"
+    }
+    column "snapshot_mode" {
+      type = "AggregateFunction(argMin, LowCardinality(Nullable(String)), DateTime64(6, 'UTC'))"
     }
     column "_timestamp" {
       type = "SimpleAggregateFunction(max, DateTime)"

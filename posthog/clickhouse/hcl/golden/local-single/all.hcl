@@ -1976,24 +1976,6 @@ database "posthog" {
     column "person_id" {
       type = "UUID"
     }
-    column "person_properties" {
-      type = "String"
-    }
-    column "group0_properties" {
-      type = "String"
-    }
-    column "group1_properties" {
-      type = "String"
-    }
-    column "group2_properties" {
-      type = "String"
-    }
-    column "group3_properties" {
-      type = "String"
-    }
-    column "group4_properties" {
-      type = "String"
-    }
     column "inserted_at" {
       type    = "DateTime64(6, 'UTC')"
       default = "timestamp"
@@ -3204,24 +3186,6 @@ database "posthog" {
     column "person_id" {
       type = "UUID"
     }
-    column "person_properties" {
-      type = "String"
-    }
-    column "group0_properties" {
-      type = "String"
-    }
-    column "group1_properties" {
-      type = "String"
-    }
-    column "group2_properties" {
-      type = "String"
-    }
-    column "group3_properties" {
-      type = "String"
-    }
-    column "group4_properties" {
-      type = "String"
-    }
     column "inserted_at" {
       type = "DateTime64(6, 'UTC')"
     }
@@ -3547,7 +3511,7 @@ database "posthog" {
       topic_list           = "clickhouse_logs"
       group_name           = "clickhouse-logs-avro-new"
       format               = "Avro"
-      num_consumers        = 8
+      num_consumers        = 1
       skip_broken_messages = 100
       poll_timeout_ms      = 3000
       poll_max_batch_size  = 1000
@@ -3679,7 +3643,7 @@ database "posthog" {
       topic_list           = "clickhouse_metrics"
       group_name           = "clickhouse-metrics-avro-new"
       format               = "Avro"
-      num_consumers        = 8
+      num_consumers        = 1
       skip_broken_messages = 100
       poll_timeout_ms      = 3000
       poll_max_batch_size  = 1000
@@ -3762,7 +3726,7 @@ database "posthog" {
       topic_list           = "clickhouse_metrics"
       group_name           = "clickhouse-metrics-avro2"
       format               = "Avro"
-      num_consumers        = 8
+      num_consumers        = 1
       skip_broken_messages = 100
       poll_timeout_ms      = 3000
       poll_max_batch_size  = 1000
@@ -4220,7 +4184,7 @@ database "posthog" {
       topic_list          = "clickhouse_property_values"
       group_name          = "clickhouse_property_values"
       format              = "JSONEachRow"
-      num_consumers       = 8
+      num_consumers       = 1
       thread_per_consumer = true
     }
   }
@@ -4285,6 +4249,9 @@ database "posthog" {
     }
     column "snapshot_library" {
       type = "Nullable(String)"
+    }
+    column "snapshot_mode" {
+      type = "LowCardinality(Nullable(String))"
     }
     column "retention_period_days" {
       type = "Nullable(Int64)"
@@ -4677,7 +4644,7 @@ database "posthog" {
       topic_list           = "clickhouse_traces"
       group_name           = "clickhouse-traces-avro"
       format               = "Avro"
-      num_consumers        = 8
+      num_consumers        = 1
       skip_broken_messages = 100
       poll_timeout_ms      = 3000
       poll_max_batch_size  = 1000
@@ -7019,9 +6986,6 @@ SQL
       index_granularity_bytes = "104857600"
       ttl_only_drop_parts     = "1"
     }
-    column "uuid" {
-      type = "String"
-    }
     column "team_id" {
       type = "Int32"
     }
@@ -7135,27 +7099,6 @@ SQL
       type        = "minmax"
       granularity = 1
     }
-    projection "projection_series_minute" {
-      query = <<SQL
-SELECT
-  team_id,
-  metric_name,
-  service_name,
-  metric_type,
-  resource_fingerprint,
-  series_fingerprint,
-  toStartOfMinute(timestamp) AS minute,
-  count() AS sample_count,
-  sum(value) AS total_value,
-  min(value) AS min_value,
-  max(value) AS max_value,
-  argMin(value, timestamp) AS first_value,
-  argMax(value, timestamp) AS last_value
-GROUP BY
-  team_id, metric_name, service_name, metric_type, resource_fingerprint, series_fingerprint, minute
-SQL
-
-    }
     projection "projection_series_activity" {
       query = <<SQL
 SELECT
@@ -7266,9 +7209,6 @@ SQL
   }
 
   table "metrics_distributed" {
-    column "uuid" {
-      type = "String"
-    }
     column "team_id" {
       type = "Int32"
     }
@@ -9397,6 +9337,9 @@ SQL
     column "retention_period_days" {
       type = "SimpleAggregateFunction(max, Nullable(Int64))"
     }
+    column "snapshot_mode" {
+      type = "AggregateFunction(argMin, LowCardinality(Nullable(String)), DateTime64(6, 'UTC'))"
+    }
     engine "distributed" {
       cluster_name    = "posthog"
       remote_database = "posthog"
@@ -11039,24 +10982,6 @@ SQL
     }
     column "person_id" {
       type = "UUID"
-    }
-    column "person_properties" {
-      type = "String"
-    }
-    column "group0_properties" {
-      type = "String"
-    }
-    column "group1_properties" {
-      type = "String"
-    }
-    column "group2_properties" {
-      type = "String"
-    }
-    column "group3_properties" {
-      type = "String"
-    }
-    column "group4_properties" {
-      type = "String"
     }
     column "inserted_at" {
       type    = "DateTime64(6, 'UTC')"
@@ -13103,6 +13028,9 @@ SQL
     }
     column "retention_period_days" {
       type = "SimpleAggregateFunction(max, Nullable(Int64))"
+    }
+    column "snapshot_mode" {
+      type = "AggregateFunction(argMin, LowCardinality(Nullable(String)), DateTime64(6, 'UTC'))"
     }
     engine "replicated_aggregating_merge_tree" {
       zoo_path     = "/clickhouse/tables/{shard}/posthog.session_replay_events"
@@ -16413,24 +16341,6 @@ SQL
     column "person_id" {
       type = "UUID"
     }
-    column "person_properties" {
-      type = "String"
-    }
-    column "group0_properties" {
-      type = "String"
-    }
-    column "group1_properties" {
-      type = "String"
-    }
-    column "group2_properties" {
-      type = "String"
-    }
-    column "group3_properties" {
-      type = "String"
-    }
-    column "group4_properties" {
-      type = "String"
-    }
     column "inserted_at" {
       type    = "DateTime64(6, 'UTC')"
       default = "timestamp"
@@ -17672,6 +17582,9 @@ SQL
     }
     column "snapshot_library" {
       type = "AggregateFunction(argMin, Nullable(String), DateTime64(6, 'UTC'))"
+    }
+    column "snapshot_mode" {
+      type = "AggregateFunction(argMin, LowCardinality(Nullable(String)), DateTime64(6, 'UTC'))"
     }
     column "_timestamp" {
       type = "SimpleAggregateFunction(max, DateTime)"
@@ -19549,12 +19462,6 @@ SELECT
   distinct_id,
   created_at,
   person_id,
-  person_properties,
-  group0_properties,
-  group1_properties,
-  group2_properties,
-  group3_properties,
-  group4_properties,
   if(inserted_at = toDateTime64('1970-01-01 00:00:00', 6, 'UTC'), _timestamp, inserted_at) AS inserted_at,
   _timestamp,
   _offset,
@@ -19585,24 +19492,6 @@ SQL
     }
     column "person_id" {
       type = "UUID"
-    }
-    column "person_properties" {
-      type = "String"
-    }
-    column "group0_properties" {
-      type = "String"
-    }
-    column "group1_properties" {
-      type = "String"
-    }
-    column "group2_properties" {
-      type = "String"
-    }
-    column "group3_properties" {
-      type = "String"
-    }
-    column "group4_properties" {
-      type = "String"
     }
     column "inserted_at" {
       type = "Nullable(DateTime64(6, 'UTC'))"
@@ -21334,7 +21223,6 @@ SQL
     to_table = "posthog.metrics2"
     query    = <<SQL
 SELECT
-  uuid,
   team_id,
   metric_name,
   series_fingerprint,
@@ -21362,9 +21250,6 @@ SELECT
 FROM posthog.metrics2_input
 SQL
 
-    column "uuid" {
-      type = "String"
-    }
     column "team_id" {
       type = "Int32"
     }
@@ -22674,7 +22559,8 @@ SELECT
   groupUniqArrayArray(ai_tags_fixed) AS ai_tags_fixed,
   groupUniqArrayArray(ai_tags_freeform) AS ai_tags_freeform,
   max(ai_highlighted) AS ai_highlighted,
-  max(surfacing_score) AS surfacing_score
+  max(surfacing_score) AS surfacing_score,
+  argMinState(snapshot_mode, first_timestamp) AS snapshot_mode
 FROM posthog.kafka_session_replay_events
 GROUP BY
   session_id, team_id
@@ -22745,6 +22631,9 @@ SQL
     }
     column "snapshot_library" {
       type = "AggregateFunction(argMin, Nullable(String), DateTime64(6, 'UTC'))"
+    }
+    column "snapshot_mode" {
+      type = "AggregateFunction(argMin, LowCardinality(Nullable(String)), DateTime64(6, 'UTC'))"
     }
     column "_timestamp" {
       type = "Nullable(DateTime)"
