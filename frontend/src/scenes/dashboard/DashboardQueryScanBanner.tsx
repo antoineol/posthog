@@ -31,16 +31,15 @@ export function DashboardQueryScanBanner(): JSX.Element | null {
             dismissKey={`query-scan-dashboard-${dashboard.id}-${signature}`}
         >
             {single
-                ? '1 insight on this dashboard runs a slow query with something to change: '
-                : `${entries.length} insights on this dashboard run slow queries with something to change: `}
+                ? '1 insight on this dashboard reads a large number of events, which can slow down dashboard loads: '
+                : `${entries.length} insights on this dashboard read a large number of events, which can slow down dashboard loads: `}
             {entries.map((entry, index) => (
                 <Fragment key={entry.tileId}>
                     {index > 0 ? ', ' : ''}
                     <Link to={urls.insightView(entry.shortId)}>{entry.name}</Link>
-                    {entry.findingCount === 1 ? ' (1 thing to change)' : ` (${entry.findingCount} things to change)`}
                 </Fragment>
             ))}
-            {single ? '. Open the insight to see the advice.' : '. Open an insight to see the advice.'}
+            {single ? '. Open it to see the advice.' : '. Open an insight to see the advice.'}
         </LemonBanner>
     )
 }
