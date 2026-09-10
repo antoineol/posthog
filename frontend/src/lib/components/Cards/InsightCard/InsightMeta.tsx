@@ -48,7 +48,8 @@ import { urls } from 'scenes/urls'
 import { uiCustomizationLogic } from '~/layout/uiCustomizationLogic'
 import { dashboardsModel } from '~/models/dashboardsModel'
 import { insightsModel } from '~/models/insightsModel'
-import { queryScanFindings, queryScanTileTooltip } from '~/queries/nodes/DataNode/queryScan'
+import { queryScanFindings } from '~/queries/nodes/DataNode/queryScan'
+import { QueryScanTileTooltip } from '~/queries/nodes/DataNode/QueryScanTileTooltip'
 import { useInsightDisplayOptions } from '~/queries/nodes/InsightViz/insightDisplayOptions'
 import { Node, ProductKey } from '~/queries/schema/schema-general'
 import { isDataVisualizationNode, isDataVisualizationNodeWithHogQLQuery } from '~/queries/utils'
@@ -250,15 +251,15 @@ export function InsightMeta({
 
     // A killed run has no result to carry the scan, so it arrives on the query status instead.
     const queryScan: QueryBasedInsightModel['query_scan'] = insight.query_scan ?? insight.query_status?.query_scan
-    const queryScanFindingCount = queryScanFindings(queryScan?.warnings).length
+    const scanFindings = queryScanFindings(queryScan?.warnings)
     // A pending scan already knows what the run cost, which is what the icon reports. Its advice,
     // if there turns out to be any, arrives on a later render.
     const queryScanTooltip =
         canEditInsight &&
         queryScan?.mode === 'show' &&
-        (queryScan.status === 'done' || queryScan.status === 'pending' || queryScanFindingCount > 0)
-            ? queryScanTileTooltip(queryScan, queryScanFindingCount, showQueryScanAdvice)
-            : null
+        (queryScan.status === 'done' || queryScan.status === 'pending' || scanFindings.length > 0) ? (
+            <QueryScanTileTooltip summary={queryScan} findings={scanFindings} showAdvice={showQueryScanAdvice} />
+        ) : null
 
     const showDashboardAlertsMenuItem = isUsedAsDashboardTile && !!dashboardId && !!insight.id && canViewInsight
     const canCreateAlertForInsight = areAlertsSupportedForInsight(query, {
@@ -816,7 +817,7 @@ export function InsightMetaContent({
     showDescription?: boolean
     infoPopover?: JSX.Element | null
     dataRetentionWarning?: string | null
-    queryScanTooltip?: string | null
+    queryScanTooltip?: JSX.Element | null
 }): JSX.Element {
     const dataRetentionIndicator = dataRetentionWarning ? (
         <Tooltip title={dataRetentionWarning}>

@@ -110,17 +110,13 @@ export function queryScanStatLine(summary: QueryScanSummary): string {
     return line
 }
 
-export function queryScanTileTooltip(summary: QueryScanSummary, findingCount: number, showAdvice: boolean): string {
-    const tooltip = `Slow query: ${formatRows(summary.rows_read)} rows in ${formatSeconds(
-        summary.duration_ms
-    )} s on the last run.`
-    if (!showAdvice || findingCount === 0) {
-        return tooltip
+export function queryScanTileStatLine(summary: QueryScanSummary): string {
+    const rows = formatRows(summary.rows_read)
+    const seconds = formatSeconds(summary.duration_ms)
+    if (summary.killed) {
+        return `ClickHouse stopped this tile's last run after ${seconds} s, having read ${rows} rows.`
     }
-    if (findingCount === 1) {
-        return `${tooltip} 1 thing to change. Open the insight to see it.`
-    }
-    return `${tooltip} ${findingCount} things to change. Open the insight to see them.`
+    return `This tile read ${rows} rows in ${seconds} s on its last run.`
 }
 
 // A `filters` finding is fixed on the insight's date range, not in the SQL, so there is nothing in

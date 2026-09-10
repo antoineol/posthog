@@ -9,25 +9,13 @@ import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { uiCustomizationLogic } from '~/layout/uiCustomizationLogic'
 
 import { QueryScanState, fixableQueryScanFindings, queryScanStatLine } from './queryScan'
+import { QueryScanFindingList } from './QueryScanFindingList'
 
 export interface QueryScanBannerProps {
     queryScan: QueryScanState | null
     /** Opens the assistant on the findings. Left out where there is no editor to write into. */
     onFixWithAI?: () => void
     className?: string
-}
-
-/** A finding marks SQL with backticks, the way the assistant reads it. */
-function withInlineCode(message: string): JSX.Element {
-    return (
-        <>
-            {message
-                .split('`')
-                .map((part, index) =>
-                    index % 2 === 1 ? <code key={index}>{part}</code> : <span key={index}>{part}</span>
-                )}
-        </>
-    )
 }
 
 export function QueryScanBanner({ queryScan, onFixWithAI, className }: QueryScanBannerProps): JSX.Element | null {
@@ -46,11 +34,7 @@ export function QueryScanBanner({ queryScan, onFixWithAI, className }: QueryScan
             <span className="text-xs text-secondary">{queryScanStatLine(summary)}</span>
             {showFindings && (
                 <LemonBanner type="warning">
-                    <ul className="list-disc pl-5">
-                        {findings.map((finding, index) => (
-                            <li key={`${finding.kind}-${index}`}>{withInlineCode(finding.message)}</li>
-                        ))}
-                    </ul>
+                    <QueryScanFindingList findings={findings} />
                     {onFixWithAI && fixableFindings.length > 0 && (
                         <LemonButton
                             className="mt-2"
