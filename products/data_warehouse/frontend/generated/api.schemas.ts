@@ -678,8 +678,6 @@ export interface FixHogQLRequestApi {
     error?: string
     /** Id of the data warehouse connection the query runs against, so the tool sees that connection's tables instead of only the ClickHouse catalog. */
     connection_id?: string
-    /** The changes to apply to the query, such as adding an event filter. Several changes go in one numbered list. Used only when `error` is empty. The tool keeps the question the query answers the same, and returns the query unchanged when no change would. */
-    instruction?: string
 }
 
 export interface FixHogQLResponseApi {

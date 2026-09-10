@@ -50,11 +50,10 @@ export const DataWarehouseProvisionCreateBody = /* @__PURE__ */ zod.object({
 })
 
 /**
- * @summary Fix or change a HogQL query
+ * @summary Fix a HogQL query
  */
 export const fixHogqlCreateBodyErrorDefault = ``
 export const fixHogqlCreateBodyConnectionIdDefault = ``
-export const fixHogqlCreateBodyInstructionDefault = ``
 
 export const FixHogqlCreateBody = /* @__PURE__ */ zod.object({
     query: zod.string().describe('The HogQL query to work on.'),
@@ -67,12 +66,6 @@ export const FixHogqlCreateBody = /* @__PURE__ */ zod.object({
         .default(fixHogqlCreateBodyConnectionIdDefault)
         .describe(
             "Id of the data warehouse connection the query runs against, so the tool sees that connection's tables instead of only the ClickHouse catalog."
-        ),
-    instruction: zod
-        .string()
-        .default(fixHogqlCreateBodyInstructionDefault)
-        .describe(
-            'The changes to apply to the query, such as adding an event filter. Several changes go in one numbered list. Used only when `error` is empty. The tool keeps the question the query answers the same, and returns the query unchanged when no change would.'
         ),
 })
 

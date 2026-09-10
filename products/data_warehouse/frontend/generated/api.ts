@@ -667,7 +667,7 @@ export const getFixHogqlCreateUrl = (projectId: string) => {
 }
 
 /**
- * @summary Fix or change a HogQL query
+ * @summary Fix a HogQL query
  */
 export const fixHogqlCreate = async (
     projectId: string,
