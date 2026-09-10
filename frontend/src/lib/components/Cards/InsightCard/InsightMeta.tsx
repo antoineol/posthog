@@ -48,7 +48,7 @@ import { urls } from 'scenes/urls'
 import { uiCustomizationLogic } from '~/layout/uiCustomizationLogic'
 import { dashboardsModel } from '~/models/dashboardsModel'
 import { insightsModel } from '~/models/insightsModel'
-import { queryScanFindings } from '~/queries/nodes/DataNode/queryScan'
+import { queryScanFindings, showQueryScanTag } from '~/queries/nodes/DataNode/queryScan'
 import { QueryScanTileTooltip } from '~/queries/nodes/DataNode/QueryScanTileTooltip'
 import { useInsightDisplayOptions } from '~/queries/nodes/InsightViz/insightDisplayOptions'
 import { Node, ProductKey } from '~/queries/schema/schema-general'
@@ -252,13 +252,10 @@ export function InsightMeta({
     // A killed run has no result to carry the scan, so it arrives on the query status instead.
     const queryScan: QueryBasedInsightModel['query_scan'] = insight.query_scan ?? insight.query_status?.query_scan
     const scanFindings = queryScanFindings(queryScan?.warnings)
-    // A pending scan already knows what the run cost, which is what the tag says. Its advice, if
-    // there turns out to be any, arrives on a later render.
+    // Without a finding the tag can only say that PostHog was slow, which leaves the viewer nothing to do.
     const queryScanTooltip =
-        canEditInsight &&
-        queryScan?.mode === 'show' &&
-        (queryScan.status === 'done' || queryScan.status === 'pending' || scanFindings.length > 0) ? (
-            <QueryScanTileTooltip summary={queryScan} findings={scanFindings} showAdvice={showQueryScanAdvice} />
+        canEditInsight && queryScan?.mode === 'show' && showQueryScanTag(scanFindings, showQueryScanAdvice) ? (
+            <QueryScanTileTooltip summary={queryScan} findings={scanFindings} />
         ) : null
 
     const showDashboardAlertsMenuItem = isUsedAsDashboardTile && !!dashboardId && !!insight.id && canViewInsight

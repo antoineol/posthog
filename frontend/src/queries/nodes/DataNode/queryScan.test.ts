@@ -7,6 +7,7 @@ import {
     queryScanStatLine,
     queryScanTileStatLine,
     resolveQueryScan,
+    showQueryScanTag,
 } from './queryScan'
 
 const SUMMARY: QueryScanSummary = {
@@ -81,6 +82,17 @@ describe('queryScan', () => {
     ] as [string, Partial<QueryScanSummary>, string][])('describes %s on a tile', (_label, summary, expected) => {
         expect(queryScanTileStatLine({ ...SUMMARY, ...summary })).toEqual(expected)
     })
+
+    it.each([
+        ['a finding and advice on', [FINDING], true, true],
+        ['a finding and advice off', [FINDING], false, false],
+        ['advice on and no finding', [], true, false],
+    ] as [string, QueryScanWarning[], boolean, boolean][])(
+        'decides the tile tag for %s',
+        (_label, findings, showAdvice, expected) => {
+            expect(showQueryScanTag(findings, showAdvice)).toEqual(expected)
+        }
+    )
 
     it('numbers every finding in the assistant prompt and asks it to explore the data first', () => {
         const prompt = queryScanAssistantPrompt([FINDING, START_DATE_FINDING])

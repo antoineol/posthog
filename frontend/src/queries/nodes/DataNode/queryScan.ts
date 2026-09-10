@@ -118,6 +118,10 @@ export function queryScanTileStatLine(summary: QueryScanSummary): string {
     return `This tile read ${rows} rows in ${seconds} s on its last run.`
 }
 
+export function showQueryScanTag(findings: QueryScanWarning[], showAdvice: boolean): boolean {
+    return showAdvice && findings.length > 0
+}
+
 // A `filters` finding is fixed on the insight's date range, not in the SQL, so there is nothing in
 // the query for the assistant to change.
 export function fixableQueryScanFindings(findings: QueryScanWarning[]): QueryScanWarning[] {
