@@ -82,12 +82,15 @@ describe('TableDisplay', () => {
         cleanup()
     })
 
-    it('offers box plots and saves the selected display', async () => {
-        const query = renderTableDisplay('table-display-box-plot')
+    test.each([
+        ['Box plot', ChartDisplayType.BoxPlot],
+        ['Donut chart', ChartDisplayType.ActionsDonut],
+    ])('offers %s and saves the selected display', async (label, displayType) => {
+        const query = renderTableDisplay(`table-display-${displayType}`)
 
-        await selectDisplay('Box plot')
+        await selectDisplay(label)
 
-        await waitFor(() => expect(query().display).toBe(ChartDisplayType.BoxPlot))
+        await waitFor(() => expect(query().display).toBe(displayType))
     })
 
     it('offers metrics behind the feature flag and saves one Y-series', async () => {
