@@ -111,8 +111,6 @@ class TestQueryScanTrigger(SimpleTestCase):
         self._assert_no_slot_was_claimed()
 
     def test_an_mcp_run_is_analyzed_despite_its_api_key(self) -> None:
-        # An MCP agent authenticates with a personal API key, but it reads the findings in the
-        # block above its results, so the skip that spares surfaceless API callers does not apply.
         tag_queries(access_method=AccessMethod.PERSONAL_API_KEY, feature=Feature.MCP)
 
         result = self._trigger()

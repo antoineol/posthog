@@ -788,8 +788,6 @@ describe('dataNodeLogic', () => {
     })
 
     it('folds a finished query scan into the response after polling for it', async () => {
-        // The scan is written by a job that outlives the run, so a response can arrive with the
-        // analysis still pending and the advice has to catch up without another run.
         jest.useFakeTimers()
         try {
             let scanCalls = 0

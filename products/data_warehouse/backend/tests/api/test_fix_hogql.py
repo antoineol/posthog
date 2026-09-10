@@ -92,8 +92,6 @@ class TestFixHogQL(APIBaseTest):
         assert "You fix HogQL errors" not in system_prompt
         assert instruction in user_prompt
         assert "<error>" not in user_prompt
-        # The banner sends one numbered list per finding, and a query nothing can improve without
-        # changing the question comes back untouched for the editor to report.
         assert "Apply every one of them." in user_prompt
         assert "return the query exactly as it is" in user_prompt
 

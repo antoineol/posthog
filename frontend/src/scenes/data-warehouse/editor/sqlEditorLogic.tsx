@@ -1799,9 +1799,8 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
         }
         const getActiveBIEditorState = (): BIEditorState | undefined =>
             values.featureFlags[FEATURE_FLAGS.SQL_EDITOR_BI_MODE] ? values.activeTab?.biEditorState : undefined
-        // One action serves the error fixer and the query scan's advice, so the outcome events have
-        // to say which ran. Without it the two features share one success and failure count, and
-        // nothing can tell them apart afterwards.
+        // One action serves the error fixer and the query scan's advice, so without a mode the two
+        // features share one success and failure count.
         const fixErrorsMode = (instruction: string | undefined): string => (instruction ? 'query_scan' : 'error')
 
         return {

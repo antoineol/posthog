@@ -531,9 +531,7 @@ class AssistantQueryExecutor:
         """Wait for the analysis of a slow run to land, so its findings reach the same reply as the
         results.
 
-        The run that produced this response enqueued the analysis microseconds ago, so the findings
-        are worth a short wait: without them the assistant reports a slow answer and says nothing
-        about why. A failure here costs the advice, never the results.
+        A failure here costs the advice, never the results.
         """
         try:
             scan = response.get("query_scan")

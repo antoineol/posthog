@@ -19,7 +19,6 @@ export interface QueryScanState {
     cacheKey: string | null
 }
 
-/** A polled scan and the run it was polled for. */
 export interface QueryScanPollResult {
     cacheKey: string
     scan: QueryScanApiResponse

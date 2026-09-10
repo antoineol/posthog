@@ -70,9 +70,8 @@ def is_analyzable_principal(user: object) -> TypeGuard[User]:
 def _is_mcp_run() -> bool:
     """Whether the run came from the MCP tool, which authenticates with a personal API key.
 
-    An MCP agent is a surface: the findings reach it in the block above the results, and it is
-    told to raise them with the person. So the API-key skip, which exists because a plain API
-    caller has nowhere to read advice, does not apply here.
+    An MCP agent reads the findings in the block above its results, so the API-key skip, which
+    exists because a plain API caller has nowhere to read advice, does not apply here.
     """
     return get_query_tag_value("feature") == Feature.MCP
 

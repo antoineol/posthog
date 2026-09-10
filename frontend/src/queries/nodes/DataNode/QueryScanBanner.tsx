@@ -18,7 +18,7 @@ export interface QueryScanBannerProps {
     className?: string
 }
 
-/** A finding marks SQL with backticks, the way the assistant reads it. Render those spans as code. */
+/** A finding marks SQL with backticks, the way the assistant reads it. */
 function withInlineCode(message: string): JSX.Element {
     return (
         <>

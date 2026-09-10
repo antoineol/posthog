@@ -344,8 +344,7 @@ class TestQueryRunner(BaseTest):
 
     def test_a_killed_run_reports_the_status_of_a_scan_another_run_owns(self):
         # A retry of a killed query has the same cache key, so the second kill finds the first
-        # one's analysis still running. Reporting that status is what keeps the reply consistent:
-        # without it the second kill carries no scan block while the first one did.
+        # one's analysis still running.
         TestQueryRunner = self.setup_test_query_runner_class()
 
         def calculate_until_clickhouse_gives_up(_self):
@@ -370,7 +369,6 @@ class TestQueryRunner(BaseTest):
         ):
             runner.run(execution_mode=ExecutionMode.CALCULATE_BLOCKING_ALWAYS, user=self.user)
 
-        # The slot is already claimed, so no second job, but the status still reaches the error.
         delay.assert_not_called()
         assert getattr(raised.exception, "query_scan", None) == {
             "mode": "show",

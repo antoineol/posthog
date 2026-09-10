@@ -104,8 +104,6 @@ def test_query_scan_block_says_clickhouse_stopped_a_killed_run():
 
 
 def test_compact_query_scan_block_carries_two_findings():
-    # The killed-run block shares a 500-character error message with the failure itself, so it
-    # spends that room on the findings most likely to explain the read.
     findings = [{**_SCAN_FINDING, "message": f"finding {index}"} for index in range(3)]
 
     block = format_query_scan_warnings({"query_scan": _scan(killed=True), "warnings": findings}, compact=True)
@@ -168,8 +166,6 @@ def test_query_scan_block_keeps_an_injected_tag_from_closing_it_early(message, e
 
 
 def test_query_scan_block_keeps_the_comparison_operator_in_the_advice():
-    # Stripping the angle bracket would leave `timestamp = now() - interval 30 day`, so the agent
-    # would propose an equality test that matches almost nothing.
     finding = build_warning(
         kind=FindingKind.NO_START_DATE,
         measurements=ScanMeasurements(rows_read=4_200_000_000, duration_ms=12_300),

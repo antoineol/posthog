@@ -156,8 +156,6 @@ describe('uiCustomizationLogic', () => {
     })
 
     it('shows query scan advice unless it is explicitly hidden, whatever the customization flag says', () => {
-        // The toggle ships with the query scan, not with sidebar customization, so the flag must
-        // not gate it.
         featureFlagLogic.actions.setFeatureFlags([], {})
         seedUser(null)
         expect(logic.values.showQueryScanAdvice).toBe(true)

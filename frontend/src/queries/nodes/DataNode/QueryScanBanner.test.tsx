@@ -39,7 +39,6 @@ const START_DATE_FINDING: QueryScanWarning = {
     fix: 'Add a start date on `timestamp`.',
 }
 
-// The fix for a missing date range is on the insight, not in the SQL the fixer would rewrite.
 const INSIGHT_SIDE_FINDING: QueryScanWarning = {
     ...FINDING,
     kind: 'no_start_date',

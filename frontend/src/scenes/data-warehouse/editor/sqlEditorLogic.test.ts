@@ -2702,9 +2702,6 @@ describe('sqlEditorLogic', () => {
     })
 
     describe('AI fixer telemetry', () => {
-        // One action serves the error fixer and the query scan's advice. Without a mode on the
-        // outcome events the two features share one success and failure count, and conflated
-        // events cannot be separated afterwards.
         const TRACE_ID = 'trace-1'
         const INSTRUCTION = 'Add an event filter naming the events this question is about.'
 
@@ -2736,8 +2733,7 @@ describe('sqlEditorLogic', () => {
 
     describe('AI fixer results', () => {
         it('leaves the editor alone when the fixer returns the query as it is', async () => {
-            // The advice prompt returns the query untouched when no change would keep the question
-            // the same. Handing that back to the editor opens a diff with nothing in it.
+            // Handing an unchanged query back to the editor opens a diff with nothing in it.
             useMocks({
                 post: {
                     '/api/environments/:team_id/fix_hogql': () => [200, { query: 'SELECT 1', trace_id: 'trace-2' }],
