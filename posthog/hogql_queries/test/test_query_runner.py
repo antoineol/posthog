@@ -348,7 +348,7 @@ class TestQueryRunner(BaseTest):
         TestQueryRunner = self.setup_test_query_runner_class()
 
         def calculate_until_clickhouse_gives_up(_self):
-            record(rows_read=90, bytes_read=900, duration_ms=4000.0)
+            record(rows_read=90, duration_ms=4000.0)
             raise ClickHouseQueryMemoryLimitExceeded()
 
         redis_client = mock.Mock()

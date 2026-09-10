@@ -10114,7 +10114,7 @@ export interface UserUIConfiguration {
      */
     version: number
     sidebar?: SidebarConfiguration
-    /** Hide the advice a query scan produces. The slow query icon and the stat line stay either way. */
+    /** Hide the advice a query scan produces. The Slow query tag and the stat line stay either way. */
     hide_query_scan_advice?: boolean
     [key: string]: unknown
 }
