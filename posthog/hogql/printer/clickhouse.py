@@ -557,6 +557,7 @@ class ClickHousePrinter(BasePrinter):
             field_type = resolve_field_type(arg.expr)
             if isinstance(field_type, ast.FieldType):
                 field = field_type.resolve_database_field(self.context)
+                assert isinstance(field, StringJSONDatabaseField)
                 subcolumns = (
                     EVENTS_PROPERTIES_JSON_SUBCOLUMNS
                     if field.name == "properties"
