@@ -30,8 +30,10 @@ def _tag_as_api_key(test: "TestQueryScanTrigger") -> None:
     tag_queries(access_method=AccessMethod.PERSONAL_API_KEY)
 
 
-def _store_a_slot(test: "TestQueryScanTrigger", thresholds: str = FLAG.thresholds_fingerprint) -> None:
-    test.redis.get.return_value = json.dumps({"version": 1, "status": "done", "findings": [], "thresholds": thresholds})
+def _store_a_slot(
+    test: "TestQueryScanTrigger", status: str = "done", thresholds: str = FLAG.thresholds_fingerprint
+) -> None:
+    test.redis.get.return_value = json.dumps({"version": 1, "status": status, "findings": [], "thresholds": thresholds})
 
 
 def _spend_the_enqueue_budget(test: "TestQueryScanTrigger") -> None:
@@ -138,15 +140,25 @@ class TestQueryScanTrigger(SimpleTestCase):
         _key, payload = self.redis.set.call_args.args
         assert json.loads(payload)["killed"] is True
 
-    def test_a_slot_from_other_thresholds_does_not_stop_a_new_scan(self) -> None:
-        # The ratios decide whether a finding exists, so a payload change has to re-analyze
-        # instead of leaving the old findings in place until the slot expires.
-        _store_a_slot(self, thresholds="0.9:0.5")
+    @parameterized.expand(
+        [
+            # The ratios decide whether a finding exists, so a payload change has to re-analyze
+            # instead of leaving the old findings in place until the slot expires.
+            ("a done slot", "done", True),
+            # The job in flight reads the current gates itself, so rejecting its slot would only
+            # enqueue a second one.
+            ("a pending slot", "pending", False),
+        ]
+    )
+    def test_a_slot_from_other_thresholds_re_analyzes_only_once_the_job_finished(
+        self, _name, status, expect_trigger
+    ) -> None:
+        _store_a_slot(self, status=status, thresholds="0.9:0.5")
 
         result = self._trigger()
 
-        assert result.triggered is True
-        assert self.delay.call_count == 1
+        assert result.triggered is expect_trigger
+        assert self.delay.call_count == (1 if expect_trigger else 0)
 
     @parameterized.expand(
         [

@@ -27,6 +27,7 @@ ROWS_READ = 500_000
 class TestQueryScanJob(BaseTest):
     def setUp(self) -> None:
         super().setUp()
+        self.calls: list[tuple[str, dict[str, Any]]] = []
         self.stored: dict[str, Any] = {}
         redis = mock.Mock()
         redis.get.side_effect = lambda key: self.stored.get(key)
@@ -59,10 +60,9 @@ class TestQueryScanJob(BaseTest):
 
     def _run(self, *, explain: Any = None, count_error: Exception | None = None, sql: str | None = None) -> list[str]:
         plan = (FIXTURES / "no_event_filter.json").read_text() if explain is None else explain
-        executed: list[str] = []
 
-        def execute(query: str, *args: Any, **kwargs: Any) -> Any:
-            executed.append(query)
+        def execute(query: str, arguments: Any = None, *args: Any, **kwargs: Any) -> Any:
+            self.calls.append((query, arguments or {}))
             if query.startswith("EXPLAIN"):
                 if isinstance(plan, Exception):
                     raise plan
@@ -74,7 +74,7 @@ class TestQueryScanJob(BaseTest):
             return [(200_000,)]
 
         def count_persons(query: str, **kwargs: Any) -> Any:
-            executed.append(query)
+            self.calls.append((query, {}))
             return mock.Mock(results=[[200_000]])
 
         with (
@@ -82,7 +82,7 @@ class TestQueryScanJob(BaseTest):
             mock.patch("posthog.query_scan.job.execute_hogql_query", side_effect=count_persons),
         ):
             run_query_scan(self._job(sql=sql) if sql is not None else self._job())
-        return executed
+        return [query for query, _arguments in self.calls]
 
     def test_writes_a_done_slot_and_reports_it(self) -> None:
         self._run()
@@ -93,6 +93,7 @@ class TestQueryScanJob(BaseTest):
         assert stored.explain_ok is True
         assert stored.events_in_range == EVENTS_IN_RANGE
         assert stored.rows_read == ROWS_READ
+        assert stored.thresholds == FLAG.thresholds_fingerprint
         # The query names no events and has no start date, so both checks fire.
         assert {str(finding.kind) for finding in stored.findings} == {"no_event_filter", "no_start_date"}
 
@@ -110,21 +111,6 @@ class TestQueryScanJob(BaseTest):
         assert stored is not None
         clauses = {str(finding.kind): finding.clause for finding in stored.findings}
         assert clauses["event_filter_not_used"] == "properties.plan = 'pro' or event = 'upgrade'"
-
-    def test_a_done_slot_from_other_thresholds_reads_as_absent(self) -> None:
-        self._run()
-
-        assert slot.get(self.team.pk, "cache_key_1", thresholds=FLAG.thresholds_fingerprint) is not None
-        raised = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.9, persons_ratio=0.5)
-        assert slot.get(self.team.pk, "cache_key_1", thresholds=raised.thresholds_fingerprint) is None
-
-    def test_a_pending_slot_survives_a_threshold_change(self) -> None:
-        # The job in flight reads the current gates itself, so rejecting its slot would only
-        # enqueue a second one.
-        slot.set_pending(self.team.pk, "cache_key_2")
-
-        raised = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.9, persons_ratio=0.5)
-        assert slot.get(self.team.pk, "cache_key_2", thresholds=raised.thresholds_fingerprint) is not None
 
     @parameterized.expand(
         [
@@ -175,39 +161,26 @@ class TestQueryScanJob(BaseTest):
         assert any("FROM raw_persons" in query for query in counts) is expect_person_count
 
     def test_the_event_count_uses_the_exact_bounds_the_query_gave(self) -> None:
-        # Rounding an explicit range out to whole days would count a day the query never read and
-        # understate the ratio, so the count takes the instants the bounds evaluated to.
-        calls: list[tuple[str, dict[str, Any]]] = []
+        self._run(
+            sql="select count() from events where timestamp >= '2026-01-10 08:00:00' "
+            "and timestamp < '2026-01-12 18:30:00'"
+        )
 
-        def execute(query: str, arguments: Any = None, *args: Any, **kwargs: Any) -> Any:
-            calls.append((query, arguments or {}))
-            if query.startswith("EXPLAIN"):
-                return [[(FIXTURES / "no_event_filter.json").read_text()]]
-            if "min(timestamp)" in query:
-                return [(EVENTS_IN_RANGE, datetime(2026, 1, 10, 8))]
-            return [(200_000,)]
-
-        with mock.patch("posthog.query_scan.job.sync_execute", side_effect=execute):
-            run_query_scan(
-                self._job(
-                    sql="select count() from events where timestamp >= '2026-01-10 08:00:00' "
-                    "and timestamp < '2026-01-12 18:30:00'"
-                )
-            )
-
-        _query, arguments = next(call for call in calls if "min(timestamp)" in call[0])
+        # Rounding an explicit range out to whole days would count a day the query never read
+        # and understate the ratio.
+        _query, arguments = next(call for call in self.calls if "min(timestamp)" in call[0])
         assert arguments["date_from"] == datetime(2026, 1, 10, 8, 0)
         assert arguments["date_to"] == datetime(2026, 1, 12, 18, 30)
 
     @override_settings(EVENTS_DATA_RETENTION_ENFORCED=True)
     def test_the_event_count_stops_at_the_retention_floor(self) -> None:
-        # The count is shown to the person, and the printer floors every events scan the same
-        # way, so counting past the floor would report events their query can no longer read.
         self.team.event_retention_months = 12
         self.team.save()
 
         executed = self._run(sql="select count() from events where timestamp > '2019-01-01'")
 
+        # The printer floors every events scan the same way, so counting past the floor would
+        # report events the query can no longer read.
         count_sql = next(query for query in executed if "min(timestamp)" in query)
         assert "toIntervalMonth(%(retention_months)s)" in count_sql
         stored = slot.get(self.team.pk, "cache_key_1")
@@ -215,24 +188,28 @@ class TestQueryScanJob(BaseTest):
         assert stored.range is not None
         assert stored.range.date_from == (datetime.now(UTC) - relativedelta(months=12)).date().isoformat()
 
-    def test_a_failed_explain_still_writes_a_done_slot(self) -> None:
-        self._run(explain=Exception("EXPLAIN timed out"))
-
-        stored = slot.get(self.team.pk, "cache_key_1")
-        assert stored is not None
-        assert stored.status == "done"
-        assert stored.explain_ok is False
-        assert self.capture.call_count == 1
-
-    def test_a_failed_count_leaves_the_pending_slot(self) -> None:
+    @parameterized.expand(
+        [
+            # The checks fall back to the tree alone, so a plan nobody could get still yields advice.
+            (
+                "a failed explain",
+                {"explain": Exception("EXPLAIN timed out")},
+                {"status": "done", "explain_ok": False},
+                1,
+            ),
+            # Without the count there is no ratio, so the claim is left for the next slow run.
+            ("a failed count", {"count_error": Exception("count timed out")}, {"status": "pending"}, 0),
+        ]
+    )
+    def test_a_clickhouse_failure_during_the_scan(self, _name, run_kwargs, expected, expected_reports) -> None:
         slot.set_pending(self.team.pk, "cache_key_1")
 
-        self._run(count_error=Exception("count timed out"))
+        self._run(**run_kwargs)
 
         stored = slot.get(self.team.pk, "cache_key_1")
         assert stored is not None
-        assert stored.status == "pending"
-        self.capture.assert_not_called()
+        assert {key: getattr(stored, key) for key in expected} == expected
+        assert self.capture.call_count == expected_reports
 
 
 class TestOpenFiltersPlaceholder(SimpleTestCase):
@@ -240,7 +217,6 @@ class TestOpenFiltersPlaceholder(SimpleTestCase):
         [
             ("no placeholder at all", "select count() from events", None, False),
             ("open filters", "select count() from events where {filters}", None, True),
-            ("open bound filters", "select count() from events where {filters(timestamp AS timestamp)}", None, True),
             (
                 "filters with a date range supplied",
                 "select count() from events where {filters}",
@@ -254,14 +230,8 @@ class TestOpenFiltersPlaceholder(SimpleTestCase):
                 True,
             ),
             (
-                "only an interval placeholder",
+                "only a dotted call placeholder",
                 "select toStartOfInterval(timestamp, {filters.interval('day')}), count() from events group by 1",
-                None,
-                False,
-            ),
-            (
-                "only a breakdown placeholder",
-                "select {filters.breakdown(properties.plan AS 'plan')}, count() from events group by 1",
                 None,
                 False,
             ),

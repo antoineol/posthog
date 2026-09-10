@@ -103,8 +103,6 @@ class TestQuery(ClickhouseTestMixin, APIBaseTest):
         ]
     )
     def test_a_killed_run_puts_its_scan_on_the_error_body(self, _name, error, expected_status):
-        # The analysis still runs and stores a slot, so without the cache key on the failure the
-        # caller has no way to read what it found.
         error.cache_key = "cache_key_1"
         error.query_scan = {"mode": "show", "rows_read": 41_200, "duration_ms": 19_000, "killed": True}
 
@@ -115,6 +113,7 @@ class TestQuery(ClickhouseTestMixin, APIBaseTest):
             )
 
         self.assertEqual(response.status_code, expected_status)
+        # Without the cache key on the failure the caller cannot read the stored analysis.
         extra = response.json()["extra"]
         self.assertEqual(extra["cache_key"], "cache_key_1")
         self.assertEqual(extra["query_scan"]["killed"], True)
@@ -1359,7 +1358,7 @@ A_STORED_SCAN = json.dumps(
         "version": 1,
         "status": "done",
         "events_in_range": 16_000,
-        "range": {"date_from": "2025-08-05", "date_to": "2026-09-09"},
+        "range": {"date_from": "2024-01-01", "date_to": "2024-03-01"},
         "killed": True,
         "thresholds": SHOW_FLAG.thresholds_fingerprint,
         "findings": [
@@ -1396,7 +1395,7 @@ class TestQueryScan(APIBaseTest):
         body = response.json()
         self.assertEqual(body["status"], "done")
         self.assertEqual(body["events_in_range"], 16_000)
-        self.assertEqual(body["range"], {"date_from": "2025-08-05", "date_to": "2026-09-09"})
+        self.assertEqual(body["range"], {"date_from": "2024-01-01", "date_to": "2024-03-01"})
         self.assertTrue(body["killed"])
         self.assertEqual([warning["kind"] for warning in body["warnings"]], ["no_event_filter"])
 

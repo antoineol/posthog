@@ -21,42 +21,6 @@ class TestServeScanSummary(BaseTest):
         super().setUp()
         self.redis = mock.Mock()
         self.redis.get.return_value = json.dumps(
-            {"version": 1, "status": "pending", "thresholds": SHOW.thresholds_fingerprint}
-        )
-        patcher = mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=self.redis)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def _cached_summary(self) -> dict:
-        # What a run stored while the flag said "show" and the floor was a second.
-        return {"mode": "show", "rows_read": 41_200, "duration_ms": 19_000, "status": "pending"}
-
-    @parameterized.expand(
-        [
-            ("the flag went off", None, None),
-            ("the mode was downgraded", LOG_ONLY, {"mode": "log_only", "status": "pending"}),
-            ("the floor was raised", RAISED_FLOOR, {"mode": "show", "status": None}),
-            ("nothing moved", SHOW, {"mode": "show", "status": "pending"}),
-        ]
-    )
-    def test_a_cached_summary_is_corrected_against_the_live_flag(self, _name, flag, expected) -> None:
-        with mock.patch("posthog.query_scan.serve.get_query_scan_flag", return_value=flag):
-            folded = scan_summary_with_findings(self.team, self._cached_summary(), "cache_key_1")
-
-        if expected is None:
-            assert folded is None
-            return
-        assert folded is not None
-        assert {key: folded[key] for key in expected} == expected
-
-    @parameterized.expand(
-        [
-            ("show", SHOW, ["no_event_filter"]),
-            ("log only", LOG_ONLY, []),
-        ]
-    )
-    def test_findings_reach_a_client_only_in_show_mode(self, _name, flag, expected_kinds) -> None:
-        self.redis.get.return_value = json.dumps(
             {
                 "version": 1,
                 "status": "done",
@@ -73,31 +37,45 @@ class TestServeScanSummary(BaseTest):
                 ],
             }
         )
-        response = SimpleNamespace(
+        patcher = mock.patch("posthog.query_scan.slot.query_cache_raw_client", return_value=self.redis)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _cached_summary(self) -> dict:
+        # What a run stored while the flag said "show" and the floor was a second.
+        return {"mode": "show", "rows_read": 41_200, "duration_ms": 19_000, "status": "pending"}
+
+    def _cached_response(self) -> SimpleNamespace:
+        return SimpleNamespace(
             query_scan=QueryScanSummary(mode="show", rows_read=41_200, duration_ms=19_000, status="pending"),
             cache_key="cache_key_1",
             warnings=[],
         )
+
+    @parameterized.expand(
+        [
+            ("the flag went off", None, None, None),
+            # `log_only` collects the analysis without showing it to anyone.
+            ("the mode was downgraded", LOG_ONLY, ("log_only", "done"), []),
+            # Below the floor nothing reads the slot, so no status can be confirmed.
+            ("the floor was raised", RAISED_FLOOR, ("show", None), []),
+            ("nothing moved", SHOW, ("show", "done"), ["no_event_filter"]),
+        ]
+    )
+    def test_a_cached_summary_is_corrected_against_the_live_flag(self, _name, flag, expected, expected_kinds) -> None:
+        response = self._cached_response()
 
         with mock.patch("posthog.query_scan.serve.get_query_scan_flag", return_value=flag):
             attach_scan_slot(self.team, response)
             folded = scan_summary_with_findings(self.team, self._cached_summary(), "cache_key_1")
 
-        assert [warning.kind for warning in response.warnings] == expected_kinds
+        if expected is None:
+            assert folded is None
+            assert response.query_scan is None
+            return
         assert response.query_scan is not None
-        assert response.query_scan.status == "done"
+        assert (response.query_scan.mode, response.query_scan.status) == expected
+        assert [warning.kind for warning in response.warnings] == expected_kinds
         assert folded is not None
-        assert [warning["kind"] for warning in folded["warnings"]] == expected_kinds
-        assert folded["status"] == "done"
-
-    def test_a_response_loses_its_summary_when_the_flag_goes_off(self) -> None:
-        response = SimpleNamespace(
-            query_scan=QueryScanSummary(mode="show", rows_read=41_200, duration_ms=19_000, status="pending"),
-            cache_key="cache_key_1",
-            warnings=[],
-        )
-
-        with mock.patch("posthog.query_scan.serve.get_query_scan_flag", return_value=None):
-            attach_scan_slot(self.team, response)
-
-        assert response.query_scan is None
+        assert (folded["mode"], folded["status"]) == expected
+        assert [warning["kind"] for warning in folded.get("warnings", [])] == expected_kinds

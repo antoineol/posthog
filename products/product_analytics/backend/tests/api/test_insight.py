@@ -5021,32 +5021,24 @@ class TestInsightErrorHandling(ClickhouseTestMixin, APIBaseTest):
         self.assertIn(error_message, str(response.json()))
 
 
-class TestInsightQueryScan(ClickhouseTestMixin, APIBaseTest):
-    # The response's `warnings` list never reaches a tile, so the serializer has to carry both the
-    # summary and the stored findings on `query_scan` or a dashboard shows nothing.
-    @patch("posthog.caching.calculate_results.calculate_for_query_based_insight")
-    def test_insight_carries_the_query_scan_with_its_findings(self, mock_calculate: mock.MagicMock) -> None:
-        insight = Insight.objects.create(
+class TestInsightQueryScan(APIBaseTest):
+    FLAG = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5)
+
+    def _insight(self) -> Insight:
+        return Insight.objects.create(
             team=self.team,
             created_by=self.user,
             query={"kind": "TrendsQuery", "series": [{"kind": "EventsNode", "event": "$pageview"}]},
         )
-        mock_calculate.return_value = InsightResult(
-            result=[],
-            last_refresh=timezone.now(),
-            cache_key="cache-key",
-            is_cached=True,
-            timezone=self.team.timezone,
-            query_scan={"mode": "show", "rows_read": 41_200, "duration_ms": 19_000},
-        )
-        flag = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5)
-        redis_client = mock.Mock()
-        redis_client.get.return_value = json.dumps(
+
+    def _stored_slot(self, *, killed: bool) -> str:
+        return json.dumps(
             {
                 "version": 1,
                 "status": "done",
                 "events_in_range": 16_000,
-                "thresholds": flag.thresholds_fingerprint,
+                "killed": killed,
+                "thresholds": self.FLAG.thresholds_fingerprint,
                 "findings": [
                     {
                         "type": "query_scan",
@@ -5060,73 +5052,54 @@ class TestInsightQueryScan(ClickhouseTestMixin, APIBaseTest):
             }
         )
 
-        with (
-            patch("posthog.query_scan.serve.get_query_scan_flag", return_value=flag),
-            patch("posthog.query_scan.slot.query_cache_raw_client", return_value=redis_client),
-        ):
-            response = self.client.get(f"/api/projects/{self.team.id}/insights/{insight.id}/")
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.json())
-        query_scan = response.json()["query_scan"]
-        self.assertEqual(query_scan["status"], "done")
-        self.assertEqual(query_scan["events_in_range"], 16_000)
-        self.assertEqual([warning["kind"] for warning in query_scan["warnings"]], ["all_time"])
-
-    # A blocking run ClickHouse stopped is the one run the advice exists for, and it has no
-    # results to carry it, so the scan has to survive the degraded result.
+    @parameterized.expand([("a completed run", False), ("a run clickhouse stopped", True)])
     @patch("posthog.caching.calculate_results.calculate_for_query_based_insight")
-    def test_a_killed_blocking_run_still_carries_its_scan(self, mock_calculate: mock.MagicMock) -> None:
-        insight = Insight.objects.create(
-            team=self.team,
-            created_by=self.user,
-            query={"kind": "TrendsQuery", "series": [{"kind": "EventsNode", "event": "$pageview"}]},
-        )
-        error = ClickHouseQueryTimeOut("query timed out")
-        error.cache_key = "cache-key"  # type: ignore[attr-defined]
-        error.query_scan = {  # type: ignore[attr-defined]
-            "mode": "show",
-            "rows_read": 41_200,
-            "duration_ms": 19_000,
-            "killed": True,
-        }
-        mock_calculate.side_effect = error
-        flag = QueryScanFlag(mode="show", floor_ms=1000, event_ratio=0.1, persons_ratio=0.5)
+    def test_an_insight_carries_the_query_scan_with_its_findings(
+        self, _name: str, killed: bool, mock_calculate: mock.MagicMock
+    ) -> None:
+        insight = self._insight()
+        summary = {"mode": "show", "rows_read": 41_200, "duration_ms": 19_000}
+        if killed:
+            # A stopped run has no results to carry the advice, so it rides on the exception.
+            error = ClickHouseQueryTimeOut("query timed out")
+            error.cache_key = "cache-key"  # type: ignore[attr-defined]
+            error.query_scan = {**summary, "killed": True}  # type: ignore[attr-defined]
+            mock_calculate.side_effect = error
+        else:
+            mock_calculate.return_value = InsightResult(
+                result=[],
+                last_refresh=timezone.now(),
+                cache_key="cache-key",
+                is_cached=True,
+                timezone=self.team.timezone,
+                query_scan=summary,
+            )
         redis_client = mock.Mock()
-        redis_client.get.return_value = json.dumps(
-            {
-                "version": 1,
-                "status": "done",
-                "events_in_range": 16_000,
-                "killed": True,
-                "thresholds": flag.thresholds_fingerprint,
-                "findings": [],
-            }
-        )
+        redis_client.get.return_value = self._stored_slot(killed=killed)
 
         with (
-            patch("posthog.query_scan.serve.get_query_scan_flag", return_value=flag),
+            patch("posthog.query_scan.serve.get_query_scan_flag", return_value=self.FLAG),
             patch("posthog.query_scan.slot.query_cache_raw_client", return_value=redis_client),
         ):
             response = self.client.get(f"/api/projects/{self.team.id}/insights/{insight.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.json())
         body = response.json()
-        self.assertEqual(body["query_scan"]["status"], "done")
-        self.assertEqual(body["query_scan"]["killed"], True)
+        # The response's `warnings` list never reaches a tile, so the findings have to ride on
+        # `query_scan` itself.
+        query_scan = body["query_scan"]
+        self.assertEqual(query_scan["status"], "done")
+        self.assertEqual(query_scan["events_in_range"], 16_000)
+        self.assertEqual(query_scan["killed"], killed)
+        self.assertEqual([warning["kind"] for warning in query_scan["warnings"]], ["all_time"])
         # The cache key addresses the stored analysis, so the client can poll for it.
         self.assertEqual(body["filters_hash"], "cache-key")
 
-    # A shared insight is read by people outside the project, and both the summary and the cache
-    # key that addresses the stored analysis describe the project's own data volume.
     @patch("posthog.caching.calculate_results.calculate_for_query_based_insight")
     def test_a_shared_insight_gets_no_scan_and_no_cache_key_on_its_query_status(
         self, mock_calculate: mock.MagicMock
     ) -> None:
-        insight = Insight.objects.create(
-            team=self.team,
-            created_by=self.user,
-            query={"kind": "TrendsQuery", "series": [{"kind": "EventsNode", "event": "$pageview"}]},
-        )
+        insight = self._insight()
         sharing_configuration = SharingConfiguration.objects.create(
             team=self.team, insight=insight, enabled=True, access_token="xyz"
         )
@@ -5153,6 +5126,8 @@ class TestInsightQueryScan(ClickhouseTestMixin, APIBaseTest):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.json())
+        # A shared insight is read from outside the project, and both fields describe the
+        # project's own data volume.
         body = response.json()
         self.assertIsNone(body["query_scan"])
         self.assertNotIn("cache_key", body["query_status"])
