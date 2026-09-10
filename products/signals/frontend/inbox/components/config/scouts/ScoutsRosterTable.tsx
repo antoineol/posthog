@@ -15,6 +15,8 @@ import {
     ScoutRosterRow,
 } from '../../../utils/scoutGroups'
 import { showsScoutOwnership } from '../../../utils/scoutOwners'
+import { SCOUT_ROSTER_WINDOW_DAYS } from '../../../utils/scoutRunsWindow'
+import { scoutCostColumns } from './ScoutCostCell'
 import { ScoutEnabledSwitch } from './ScoutConfigControls'
 import { ScoutNameCell } from './ScoutNameCell'
 import { ScoutNextRunLabel } from './ScoutNextRunLabel'
@@ -35,7 +37,8 @@ import { ScoutStatusDot } from './ScoutStatusDot'
  * nothing to say about a canonical one.
  */
 export function ScoutsRosterTable({ compact }: { compact: boolean }): JSX.Element {
-    const { rosterScouts, rollups, updatingScoutIds, scoutRunsLoadedOnce, scoutRunCosts } = useValues(scoutFleetLogic)
+    const { rosterScouts, rollups, updatingScoutIds, scoutRunsLoadedOnce, scoutRunCosts, scoutCostRollups } =
+        useValues(scoutFleetLogic)
     const { updateScoutConfig } = useActions(scoutFleetLogic)
 
     if (rosterScouts.length === 0) {
@@ -130,6 +133,12 @@ export function ScoutsRosterTable({ compact }: { compact: boolean }): JSX.Elemen
                         </span>
                     ),
                 },
+                // Cost sits before the run strip, and drops out of the compact layout with the
+                // other detail columns. Absent for everyone but staff, and while no scout on the
+                // roster has a priced run in the window.
+                ...(compact || scoutCostRollups.size === 0
+                    ? []
+                    : scoutCostColumns(scoutCostRollups, SCOUT_ROSTER_WINDOW_DAYS)),
                 {
                     // "Recent runs" doesn't fit the compact column, and a right-aligned header clips
                     // from its left — it would read as "ent runs".
