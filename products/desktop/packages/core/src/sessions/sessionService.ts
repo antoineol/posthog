@@ -2245,6 +2245,7 @@ export class SessionService {
     }
 
     this.d.store.setSession(session);
+    this.updatePromptStateFromEvents(taskRunId, session.events);
     this.subscribeToChannel(taskRunId);
 
     try {
