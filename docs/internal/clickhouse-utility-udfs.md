@@ -182,6 +182,10 @@ The buffer-reuse test alternates dotted-object widths and verifies exact output,
 
 These local measurements should be repeated on deployment hardware before estimating fleet capacity.
 
+HogQL `JSONExtract*` calls with `$feature_flags` as their first property key use the same
+restricted-property-aware map as dotted `$feature_flags` access on both event schemas.
+The original extractor still determines the return type and missing-value default.
+
 ## Running native JSON schema tests
 
 The `test-new-events-schema` PR label enables the additional backend CI jobs with
