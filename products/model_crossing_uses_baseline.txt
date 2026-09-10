@@ -925,7 +925,7 @@ web_analytics:backend/hogql_queries/ products.posthog_ai.scripts.hogql_example.t
 web_analytics:backend/hogql_queries/ products.product_analytics.backend.hogql_queries.trends.test.test_trends_data_warehouse_query drives(TrendsQuery) 23
 web_analytics:backend/hogql_queries/ products.product_analytics.backend.hogql_queries.trends.test.test_trends_query_builder drives(TrendsQuery) 7
 web_analytics:backend/hogql_queries/ products.product_analytics.backend.hogql_queries.trends.test.test_trends_query_runner drives(TrendsQuery) 2
-web_analytics:backend/hogql_queries/ products.product_analytics.backend.tests.api.test_insight drives(TrendsQuery) 24
+web_analytics:backend/hogql_queries/ products.product_analytics.backend.tests.api.test_insight drives(TrendsQuery) 22
 web_analytics:backend/hogql_queries/ products.product_analytics.backend.tests.api.test_insight_metadata drives(TrendsQuery) 5
 web_analytics:backend/hogql_queries/ products.product_analytics.backend.tests.api.test_insight_query drives(TrendsQuery) 4
 web_analytics:backend/hogql_queries/ products.product_analytics.backend.tests.api.test_paths_v2 drives(TrendsQuery) 1
