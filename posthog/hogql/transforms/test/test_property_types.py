@@ -180,7 +180,9 @@ class TestNewEventsSchemaPropertySubcolumns(SimpleTestCase):
         # array optimizer, which then falls back to multiSearchAnyCaseInsensitive(toString(…)) over the
         # array serialized to JSON text instead of an element-wise arrayExists scan.
         assert "arrayExists" in printed, printed
-        assert "events.properties.`$active_feature_flags`" in printed, printed
+        assert "mapKeys(mapFilter(" in printed, printed
+        assert "events.properties.`$feature_flags`" in printed, printed
+        assert "events.properties.`$active_feature_flags`" not in printed, printed
         assert "multiSearchAnyCaseInsensitive(toString(" not in printed, printed
         # The missing-property branch must resolve to empty(column), not isNull(toJSONString(column)),
         # or every row pays to serialize the array just to null-check it.
