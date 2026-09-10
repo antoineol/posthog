@@ -3,10 +3,9 @@ from unittest import mock
 
 from parameterized import parameterized
 
-from posthog.rate_limit import AIBurstRateThrottle, AISustainedRateThrottle
+from posthog.rate_limit import AIBurstRateThrottle
 
 from products.data_warehouse.backend.max_tools import HogQLQueryFixerTool
-from products.data_warehouse.backend.presentation.views.fix_hogql import FixHogQLViewSet
 
 
 class TestFixHogQL(APIBaseTest):
@@ -95,5 +94,15 @@ class TestFixHogQL(APIBaseTest):
         assert "Apply every one of them." in user_prompt
         assert "return the query exactly as it is" in user_prompt
 
-    def test_fixing_a_query_uses_the_ai_throttles(self):
-        assert FixHogQLViewSet.throttle_classes == [AIBurstRateThrottle, AISustainedRateThrottle]
+    def test_fixing_a_query_is_rate_limited(self):
+        with (
+            mock.patch.object(AIBurstRateThrottle, "allow_request", return_value=False),
+            # DRF asks a throttle that refused how long the caller has to wait for.
+            mock.patch.object(AIBurstRateThrottle, "wait", return_value=60),
+        ):
+            response = self.client.post(
+                f"/api/environments/{self.team.id}/fix_hogql/",
+                {"query": "select timestam from events", "error": "Unable to resolve field: timestam"},
+            )
+
+        assert response.status_code == 429

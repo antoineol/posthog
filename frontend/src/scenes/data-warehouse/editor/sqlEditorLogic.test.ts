@@ -2732,8 +2732,22 @@ describe('sqlEditorLogic', () => {
     })
 
     describe('AI fixer results', () => {
-        it('leaves the editor alone when the fixer returns the query as it is', async () => {
-            // Handing an unchanged query back to the editor opens a diff with nothing in it.
+        it.each([
+            // Handing an unchanged query back to the editor opens a diff with nothing in it, but
+            // only the advice fixer answers a question by leaving the query as it is.
+            {
+                name: 'leaves the editor alone when the query scan fixer returns the query as it is',
+                error: undefined,
+                instruction: 'Add an event filter.',
+                source: null,
+            },
+            {
+                name: 'still suggests when the error fixer returns the query as it is',
+                error: 'boom',
+                instruction: undefined,
+                source: 'hogql_fixer',
+            },
+        ])('$name', async ({ error, instruction, source }) => {
             useMocks({
                 post: {
                     '/api/environments/:team_id/fix_hogql': () => [200, { query: 'SELECT 1', trace_id: 'trace-2' }],
@@ -2744,10 +2758,10 @@ describe('sqlEditorLogic', () => {
             logic.actions.createTab('SELECT 1')
             await expectLogic(logic).toDispatchActions(['createTab', 'updateTab'])
 
-            fixSQLErrorsLogic.actions.fixErrors('SELECT 1', undefined, undefined, 'Add an event filter.')
+            fixSQLErrorsLogic.actions.fixErrors('SELECT 1', error, undefined, instruction)
             await expectLogic(fixSQLErrorsLogic).toDispatchActions(['fixErrorsSuccess'])
 
-            expect(logic.values.suggestionPayload).toBeNull()
+            expect(logic.values.suggestionPayload?.source ?? null).toBe(source)
         })
     })
 

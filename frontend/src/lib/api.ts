@@ -1743,7 +1743,7 @@ export class ApiRequest {
     }
 
     public queryScan(cacheKey: string, teamId?: TeamType['id']): ApiRequest {
-        return this.query(teamId).addPathComponent(cacheKey).addPathComponent('scan')
+        return this.query(teamId).addPathComponent('scan').addPathComponent(cacheKey)
     }
 
     public queryCancel(clientQueryId: string, teamId?: TeamType['id']): ApiRequest {

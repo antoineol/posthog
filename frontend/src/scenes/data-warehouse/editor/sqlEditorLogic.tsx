@@ -1815,8 +1815,9 @@ export const sqlEditorLogic = kea<sqlEditorLogicType>([
                 })
 
                 // The advice prompt returns the query untouched when no change would keep the
-                // question the same, so an identical query is an answer, not a failed edit.
-                if (response.query === values.queryInput) {
+                // question the same, so an identical query is an answer, not a failed edit. The
+                // error fixer has no such answer, so it still goes through the diff.
+                if (payload?.instruction && response.query === payload.query) {
                     lemonToast.info('No change would keep the question the same, so the query is unchanged.')
                     return
                 }

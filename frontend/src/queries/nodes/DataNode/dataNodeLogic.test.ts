@@ -793,7 +793,7 @@ describe('dataNodeLogic', () => {
             let scanCalls = 0
             useMocks({
                 get: {
-                    '/api/environments/:team_id/query/:cache_key/scan/': () => {
+                    '/api/environments/:team_id/query/scan/:cache_key/': () => {
                         scanCalls += 1
                         return [
                             200,
